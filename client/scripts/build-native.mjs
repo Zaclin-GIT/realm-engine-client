@@ -9,12 +9,16 @@ const require = createRequire(import.meta.url);
 const nativeDir = resolve(__dirname, '..', 'electron', 'native');
 const nativeOutDir = resolve(__dirname, '..', 'src', 'native');
 const helloEventStub = resolve(nativeOutDir, 'hello-event.js');
+const rotmgSharedStub = resolve(nativeOutDir, 'rotmg-shared.js');
 
 if (!existsSync(nativeDir)) {
   console.log('[build:native] electron/native not found — writing stubs and skipping native build.');
   mkdirSync(nativeOutDir, { recursive: true });
   if (!existsSync(helloEventStub)) {
     writeFileSync(helloEventStub, '// Stub — real implementation provided by the Windows native build.\nexport function signalHelloEvent() {}\n');
+  }
+  if (!existsSync(rotmgSharedStub)) {
+    writeFileSync(rotmgSharedStub, '// Stub — real implementation provided by the Windows native build.\nexport const DEFENSE_UNSET = -1;\nexport function openShared() { return false; }\nexport function readPosition() { return null; }\n');
   }
   process.exit(0);
 }

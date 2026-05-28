@@ -39,7 +39,7 @@ if "!WSL_PARENT!"=="" (
         set "WSL_PARENT=home\!WSL_USER!\LFG"
     )
 )
-if "!WIN_BASE!"==""     set "WIN_BASE=%USERPROFILE%\Desktop\test"
+if "!WIN_BASE!"==""     set "WIN_BASE=C:\realm-engine"
 
 REM ── Detect WSL mount ────────────────────────────────────────────────────────
 set "WSL_BASE="

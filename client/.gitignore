@@ -156,6 +156,5 @@ data/rotmg-extractor-game/
 # Excluded from remote (per project policy)
 README.md
 native/
-assets/winhttp.dll
 assets/internal.bin
 assets/internal.dll

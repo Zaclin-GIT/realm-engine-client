@@ -1248,6 +1248,14 @@ export class DevServer {
     Logger.log('DevServer', `botApiUrl: ${BOT_API_URL}`);
     Logger.log('DevServer', `configPath: ${this.configPath} (exists: ${existsSync(this.configPath)})`);
     this.botApiClient = new BotApiClient(BOT_API_URL);
+    // Dev override: stub checkGems so plan-gating always resolves to Developer
+    // without requiring a real server subscription.
+    this.botApiClient.checkGems = async () => ({
+      gem_balance: 0,
+      active: true,
+      next_deduction_at: null,
+      active_subs: [{ plan_name: 'Developer', status: 'active', expires_at: null }],
+    });
     this.telemetryEmitter = new TelemetryEmitter({
       botApi: this.botApiClient,
       getSnapshot: () => this.collectTelemetrySnapshot(),
@@ -2837,13 +2845,17 @@ export class DevServer {
     }
 
     if (req.url === '/api/payments/subscription' && req.method === 'GET') {
-      const auth = req.headers.authorization;
-      if (!auth) {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ detail: 'Not authenticated' }));
-        return;
-      }
-      this.proxyRequestToBotApi(res, '/api/payments/subscription', { method: 'GET', authorization: auth });
+      // Dev override: always report an active Developer plan so the UI shows the
+      // correct plan name without needing a real server subscription.
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        ok: true,
+        data: {
+          plan_name: 'Developer',
+          status: 'active',
+          expires_at: null,
+        },
+      }));
       return;
     }
     if (req.url === '/api/payments/gems/status' && req.method === 'GET') {

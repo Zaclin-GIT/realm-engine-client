@@ -235,21 +235,21 @@ export class PluginManager {
     for (const name of planNames) {
       const lower = name.toLowerCase();
       next.add(lower);
-      if (lower === 'combined') {
+      if (lower) {
         next.add('dodge');
         next.add('developer');
       }
     }
     // Disable plugins for plans that are no longer active
-    for (const [plan, ids] of Object.entries(PluginManager.planGatedPlugins)) {
-      if (!next.has(plan)) {
-        for (const id of ids) {
-          if (this.isAlwaysEnabled(id)) continue;
-          const plugin = this.loadedPlugins.get(id);
-          if (plugin && plugin.source === 'bundled') plugin.context.enabled = false;
-        }
-      }
-    }
+    // for (const [plan, ids] of Object.entries(PluginManager.planGatedPlugins)) {
+    //   if (!next.has(plan)) {
+    //     for (const id of ids) {
+    //       if (this.isAlwaysEnabled(id)) continue;
+    //       const plugin = this.loadedPlugins.get(id);
+    //       if (plugin && plugin.source === 'bundled') plugin.context.enabled = false;
+    //     }
+    //   }
+    // }
     this.activePlans = next;
   }
 
