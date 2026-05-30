@@ -11,13 +11,13 @@ function toStatInt(value: number | string): number {
  * Comprehensive player state tracking.
  * Ported from KRelayBetter's PlayerData.cs.
  *
- * **Combined (gear + exalt)** on the wire — these are the stat ids to read:
+ * **Combined (gear + exalt)** on the wire -> these are the stat ids to read:
  *   46 HP max boost, 47 MP max boost, 48 ATK, 49 DEF, 50 SPD, 51 VIT, 52 WIS, 53 DEX.
  *
  * **Exalt-only** slices (subtract from the matching combined row above for true gear):
  *   105 ATK, 106 DEF, 107 SPD, 108 VIT, 109 DEX, 110 WIS, 111 max HP, 112 max MP.
  *
- * Public `healthBonus` … `dexterityBonus` = max(0, combined − exalt). `exalted*` holds the exalt slice.
+ * Public `healthBonus` through `dexterityBonus` = max(0, combined - exalt). `exalted*` holds the exalt slice.
  */
 export class PlayerData {
   ownerObjectId = 0;
@@ -59,7 +59,7 @@ export class PlayerData {
   exaltedMaxMP = 0;
   exaltationDamageMultiplier = 0;
 
-  /** Latest wire **combined** (gear+exalt): 46,47,48–53 — null until that stat appears in a status batch. */
+  /** Latest wire **combined** (gear+exalt): 46,47,48-53 -> null until that stat appears in a status batch. */
   private _wireHpBoost: number | null = null;
   private _wireMpBoost: number | null = null;
   private _wireAttackBonus: number | null = null;
@@ -72,7 +72,7 @@ export class PlayerData {
   // Inventory: slots 0-11, backpack 0-15
   inventory: number[] = new Array(12).fill(-1);
   backpack: number[] = new Array(16).fill(-1);
-  quickSlots: number[] = new Array(3).fill(-1);
+  quickSlots: Array<{ itemType: number; quantity: number }> = Array.from({ length: 3 }, () => ({ itemType: -1, quantity: 0 }));
   healthStackCount = 0;
   magicStackCount = 0;
 
@@ -89,7 +89,7 @@ export class PlayerData {
   teleportAllowed = false;
 
   /**
-   * S→C `QUESTOBJECTID`: current quest target entity id.
+   * S->C `QUESTOBJECTID`: current quest target entity id.
    * `-1` = not yet known or cleared (e.g. new map), `0` = none, `>0` = object id.
    */
   questObjectId = -1;
@@ -124,7 +124,7 @@ export class PlayerData {
   /** Stat 124: power level. */
   powerLevel = 0;
 
-  /** Gear-only = max(0, combined − exalted); exalted ≤ 0 treated as 0. */
+  /** Gear-only = max(0, combined - exalted); exalted <= 0 treated as 0. */
   private static gearOnlyFromCombined(combined: number, exalted: number): number {
     const c = Math.trunc(Number(combined)) || 0;
     const e = Math.trunc(Number(exalted)) || 0;
@@ -136,7 +136,7 @@ export class PlayerData {
     this.hasBackpack = this.backpackTier !== 0 || this.legacyHasBackpackStat75;
   }
 
-  /** Stat 130 tier ≥ 16 → backpack + extender. */
+  /** Stat 130 tier >= 16 -> backpack + extender. */
   get hasBackpackExtender(): boolean {
     return this.backpackTier >= 16;
   }
@@ -179,7 +179,7 @@ export class PlayerData {
   }
 
   /** Parse a single stat update. */
-  parseStat(id: number, value: number | string): void {
+  parseStat(id: number, value: number | string, stackCount?: number): void {
     switch (id) {
       case StatType.MaxHP: this.maxHealth = value as number; break;
       case StatType.HP: this.health = value as number; break;
@@ -211,7 +211,7 @@ export class PlayerData {
       case StatType.VitalityBonus: this._wireVitalityBonus = toStatInt(value); break; // 51 combined
       case StatType.WisdomBonus: this._wireWisdomBonus = toStatInt(value); break; // 52 combined
       case StatType.DexterityBonus: this._wireDexterityBonus = toStatInt(value); break; // 53 combined
-      /** Exaltation damage received multiplier ×1000 (default 1000 in game); MultiTool Class27 Int32_47. */
+      /** Exaltation damage received multiplier /1000 (default 1000 in game); MultiTool Class27 Int32_47. */
       case StatType.ExaltationDamageMultiplier: this.exaltationDamageMultiplier = toStatInt(value); break;
       case StatType.Skin: this.skin = value as number; break;
       case StatType.GuildName: this.guildName = value as string; break;
@@ -226,17 +226,17 @@ export class PlayerData {
         this.backpackTier = toStatInt(value);
         this.refreshBackpackPresenceFromStats();
         break;
-      case StatType.QuickSlot0: this.quickSlots[0] = toStatInt(value); break;
-      case StatType.QuickSlot1: this.quickSlots[1] = toStatInt(value); break;
-      case StatType.QuickSlot2: this.quickSlots[2] = toStatInt(value); break;
-      case StatType.WireExaltAttack: this.exaltedAttack = toStatInt(value); break; // 105 → subtract from 48
-      case StatType.WireExaltDefense: this.exaltedDefense = toStatInt(value); break; // 106 → from 49
-      case StatType.WireExaltSpeed: this.exaltedSpeed = toStatInt(value); break; // 107 → from 50
-      case StatType.WireExaltVitality: this.exaltedVitality = toStatInt(value); break; // 108 → from 51
-      case StatType.WireExaltDexterity: this.exaltedDexterity = toStatInt(value); break; // 109 → from 53
-      case StatType.WireExaltWisdom: this.exaltedWisdom = toStatInt(value); break; // 110 → from 52
-      case StatType.WireExaltMaxHP: this.exaltedMaxHP = toStatInt(value); break; // 111 → from 46
-      case StatType.WireExaltMaxMP: this.exaltedMaxMP = toStatInt(value); break; // 112 → from 47
+      case StatType.QuickSlot0: this.quickSlots[0] = { itemType: toStatInt(value), quantity: Math.max(0, toStatInt(stackCount ?? 0)) }; break;
+      case StatType.QuickSlot1: this.quickSlots[1] = { itemType: toStatInt(value), quantity: Math.max(0, toStatInt(stackCount ?? 0)) }; break;
+      case StatType.QuickSlot2: this.quickSlots[2] = { itemType: toStatInt(value), quantity: Math.max(0, toStatInt(stackCount ?? 0)) }; break;
+      case StatType.WireExaltAttack: this.exaltedAttack = toStatInt(value); break; // 105 -> subtract from 48
+      case StatType.WireExaltDefense: this.exaltedDefense = toStatInt(value); break; // 106 -> from 49
+      case StatType.WireExaltSpeed: this.exaltedSpeed = toStatInt(value); break; // 107 -> from 50
+      case StatType.WireExaltVitality: this.exaltedVitality = toStatInt(value); break; // 108 -> from 51
+      case StatType.WireExaltDexterity: this.exaltedDexterity = toStatInt(value); break; // 109 -> from 53
+      case StatType.WireExaltWisdom: this.exaltedWisdom = toStatInt(value); break; // 110 -> from 52
+      case StatType.WireExaltMaxHP: this.exaltedMaxHP = toStatInt(value); break; // 111 -> from 46
+      case StatType.WireExaltMaxMP: this.exaltedMaxMP = toStatInt(value); break; // 112 -> from 47
       default:
         // Inventory slots 8-19
         if (id >= 8 && id <= 19) {
@@ -253,7 +253,7 @@ export class PlayerData {
   /** Parse stats from a Status data array. */
   parseStatus(statDataArray: any[]): void {
     for (const stat of statDataArray) {
-      this.parseStat(stat.id, stat.value);
+      this.parseStat(stat.id, stat.value, stat.stackCount);
     }
     this.applyGearBonusesFromWireMinusExalt();
   }

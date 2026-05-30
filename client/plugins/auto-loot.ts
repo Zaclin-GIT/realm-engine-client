@@ -27,11 +27,19 @@ interface AutoLootState {
   lastPickupAt: number;
   recentAttempts: Map<string, number>;
   pendingDestSlotId: number | null;
+  pendingDestQuantity: number | null;
+  pendingPotionItemId: number | null;
   pendingSince: number;
   bagSeenAt: Map<number, number>;
   notifiedBagIds: Set<number>;
   lastPos: { x: number; y: number } | null;
   stationaryTicks: number;
+  reservedDestSlots: Map<number, number>;
+  consumedBagSlots: Map<string, number>;
+  manualPotionSuppressUntil: number;
+  lastManualPotionSuppressLogAt: number;
+  manualPotionPacketBlockUntil: number;
+  lastManualPotionPacketBlockLogAt: number;
 }
 
 interface LootDestination {
@@ -47,6 +55,8 @@ const DEFAULT_MIN_RING_TIER = 6;
 const PICKUP_INTERVAL_MS = 600;
 const RETRY_ITEM_AFTER_MS = 1500;
 const PENDING_DEST_TIMEOUT_MS = 1200;
+const DEST_SLOT_RESERVE_MS = 30000;
+const BAG_SLOT_CONSUME_MS = 30000;
 const ON_TOP_DISTANCE = 1.0;
 const PUBLIC_BAG_DELAY_MS = 2000;
 const STATIONARY_TICK_LIMIT = 100;
@@ -57,6 +67,14 @@ const MAX_HP_QUICKSLOT_STACK = 6;
 const MAX_MP_QUICKSLOT_STACK = 6;
 const BAG_NOTIFY_RADIUS = 16;
 const BAG_NOTIFY_ITEM_LIMIT = 8;
+const DEFAULT_MANUAL_POTION_SUPPRESS_MS = 4000;
+const MIN_MANUAL_POTION_SUPPRESS_MS = 1000;
+const MAX_MANUAL_POTION_SUPPRESS_MS = 12000;
+const MANUAL_POTION_SUPPRESS_LOG_MS = 1500;
+const DEFAULT_MANUAL_POTION_PACKET_BLOCK_MS = 1200;
+const MIN_MANUAL_POTION_PACKET_BLOCK_MS = 300;
+const MAX_MANUAL_POTION_PACKET_BLOCK_MS = 3000;
+const MANUAL_POTION_PACKET_BLOCK_LOG_MS = 500;
 
 const BAG_TYPES = new Set<number>([
   1280, 1281, 1283, 1286, 1287, 1288, 1289, 1291, 1292, 1294, 1295, 1296,
@@ -81,7 +99,7 @@ const ABILITY_SLOT_TYPES = new Set<number>([4, 5, 11, 12, 13, 15, 16, 18, 19, 20
 const ARMOR_SLOT_TYPES = new Set<number>([6, 7, 14]);
 const RING_SLOT_TYPES = new Set<number>([9]);
 
-/** Weapon / ability / armor / ring slots — same buckets as {@link getGearCategory}. */
+/** Weapon / ability / armor / ring slots -> same buckets as {@link getGearCategory}. */
 function isGearSlotType(slotType: number): boolean {
   return WEAPON_SLOT_TYPES.has(slotType)
     || ABILITY_SLOT_TYPES.has(slotType)
@@ -119,7 +137,7 @@ const MYSTERY_STAT_POT_ID = 5094;
 
 type PermanentStatKey = 'attack' | 'defense' | 'speed' | 'dexterity' | 'vitality' | 'wisdom';
 
-/** Which permanent stat (wire 20–22, 26–28; before gear) each potion raises — id lines in `STAT_POTION_IDS` comments. */
+/** Which permanent stat each potion raises. See id lines in `STAT_POTION_IDS` comments. */
 const STAT_POT_ITEM_TO_PERMANENT: Record<number, PermanentStatKey> = {
   2591: 'defense',
   2592: 'speed',
@@ -158,7 +176,7 @@ function classCapForPermanent(caps: PlayerClassStatMaxes, s: PermanentStatKey): 
 }
 
 /**
- * `PlayerData.attack` … `wisdom` = permanent stats (class + level + pots); not gear 48+ / exalt.
+ * `PlayerData.attack` through `wisdom` = permanent stats (class + level + pots); not gear 48+ / exalt.
  * Skip autodrink if that value is already at/above the class 8/8 `max` from objects.xml.
  */
 function shouldSkipAutodrinkClassCap(
@@ -192,7 +210,7 @@ function shouldSkipAutodrinkClassCap(
 const UNIQUE_DATA_STAT_ID = 80;
 
 /**
- * Decode one base64 segment from stat 80 → enchant type ids.
+ *  Decode one base64 segment from stat 80 -> enchant type ids.
  * Wire format: 1-byte header, 2-byte type 0x0402, then 2-byte LE ids until 0xFFFD.
  */
 function decodeEnchantIdsFromBlob(code: string): number[] {
@@ -291,6 +309,8 @@ export function register(ctx: PluginContext) {
   let useBackpack = true;
   let preferBackpack = false;
   let restockQuickSlots = true;
+  let manualPotionSuppressMs = DEFAULT_MANUAL_POTION_SUPPRESS_MS;
+  let manualPotionPacketBlockMs = DEFAULT_MANUAL_POTION_PACKET_BLOCK_MS;
   let bagNotifierEnabled = false;
   let bigLootBags = false;
   let minEnchantTier = 0;
@@ -419,7 +439,7 @@ export function register(ctx: PluginContext) {
   });
 
   ctx.registerSetting('autodrinkStatPots', {
-    label: 'Autodrink Stat Pots (USEITEM from bag, 0,0 — no loot)', advanced: true,
+    label: 'Autodrink Stat Pots (USEITEM from bag, 0,0 - no loot)', advanced: true,
     type: 'boolean',
     value: autodrinkStatPots,
   }, (value: boolean) => {
@@ -431,11 +451,11 @@ export function register(ctx: PluginContext) {
     type: 'select',
     value: 'none',
     options: [
-      { label: 'None', value: 'none' },
-      { label: 'Uncommon (≥1 enchant)', value: 'uncommon' },
-      { label: 'Rare (≥2)', value: 'rare' },
-      { label: 'Legendary (≥3)', value: 'legendary' },
-      { label: 'Divine (≥4)', value: 'divine' },
+            { label: 'None', value: 'none' },
+      { label: 'Uncommon (>=1 enchant)', value: 'uncommon' },
+      { label: 'Rare (>=2)', value: 'rare' },
+      { label: 'Legendary (>=3)', value: 'legendary' },
+      { label: 'Divine (>=4)', value: 'divine' },
     ],
   }, (value: string) => {
     minEnchantTier = minEnchantSelectToCount(value);
@@ -503,6 +523,38 @@ export function register(ctx: PluginContext) {
     value: restockQuickSlots,
   }, (value: boolean) => {
     restockQuickSlots = value === true;
+  });
+
+  ctx.registerSetting('manualPotionPauseSeconds', {
+    label: 'Manual Potion Pause (seconds)', advanced: true,
+    type: 'number',
+    value: manualPotionSuppressMs / 1000,
+    min: MIN_MANUAL_POTION_SUPPRESS_MS / 1000,
+    max: MAX_MANUAL_POTION_SUPPRESS_MS / 1000,
+    step: 0.5,
+  }, (value: number) => {
+    const seconds = Number(value);
+    const ms = Math.trunc((Number.isFinite(seconds) ? seconds : DEFAULT_MANUAL_POTION_SUPPRESS_MS / 1000) * 1000);
+    manualPotionSuppressMs = Math.max(
+      MIN_MANUAL_POTION_SUPPRESS_MS,
+      Math.min(MAX_MANUAL_POTION_SUPPRESS_MS, ms),
+    );
+  });
+
+  ctx.registerSetting('manualPotionPacketBlockSeconds', {
+    label: 'Manual Potion Packet Block (seconds)', advanced: true,
+    type: 'number',
+    value: manualPotionPacketBlockMs / 1000,
+    min: MIN_MANUAL_POTION_PACKET_BLOCK_MS / 1000,
+    max: MAX_MANUAL_POTION_PACKET_BLOCK_MS / 1000,
+    step: 0.1,
+  }, (value: number) => {
+    const seconds = Number(value);
+    const ms = Math.trunc((Number.isFinite(seconds) ? seconds : DEFAULT_MANUAL_POTION_PACKET_BLOCK_MS / 1000) * 1000);
+    manualPotionPacketBlockMs = Math.max(
+      MIN_MANUAL_POTION_PACKET_BLOCK_MS,
+      Math.min(MAX_MANUAL_POTION_PACKET_BLOCK_MS, ms),
+    );
   });
 
   ctx.registerSetting('toggleBagNotifier', {
@@ -609,15 +661,163 @@ export function register(ctx: PluginContext) {
         lastPickupAt: 0,
         recentAttempts: new Map<string, number>(),
         pendingDestSlotId: null,
+        pendingDestQuantity: null,
+        pendingPotionItemId: null,
         pendingSince: 0,
         bagSeenAt: new Map<number, number>(),
         notifiedBagIds: new Set<number>(),
         lastPos: null,
         stationaryTicks: 0,
+        reservedDestSlots: new Map<number, number>(),
+        consumedBagSlots: new Map<string, number>(),
+        manualPotionSuppressUntil: 0,
+        lastManualPotionSuppressLogAt: 0,
+        manualPotionPacketBlockUntil: 0,
+        lastManualPotionPacketBlockLogAt: 0,
       };
       states.set(client, state);
     }
     return state;
+  }
+  function cleanupReservations(state: AutoLootState, now: number): void {
+    for (const [slot, until] of state.reservedDestSlots.entries()) {
+      if (until <= now) state.reservedDestSlots.delete(slot);
+    }
+
+    for (const [key, until] of state.consumedBagSlots.entries()) {
+      if (until <= now) state.consumedBagSlots.delete(key);
+    }
+  }
+
+  function isReservedDestination(state: AutoLootState, packetSlotId: number, now: number): boolean {
+    return Number(state.reservedDestSlots.get(packetSlotId) || 0) > now;
+  }
+
+  function makeBagSlotKey(bag: TrackedEntity, bagSlot: number, itemId: number): string {
+    return `${bag.objectId}:${bagSlot}:${itemId}`;
+  }
+
+  function isQuickslotPacketSlot(packetSlotId: number): boolean {
+    return packetSlotId >= QUICKSLOT_PACKET_BASE
+      && packetSlotId < (QUICKSLOT_PACKET_BASE + QUICK_SLOT_COUNT);
+  }
+
+  function readQuickSlot(client: ClientConnection, slot: number): { itemType: number; quantity: number } {
+    const raw = (client.playerData as any).quickSlots?.[slot];
+
+    if (typeof raw === 'number') {
+      return { itemType: raw > 0 ? raw : -1, quantity: 0 };
+    }
+
+    if (raw && typeof raw === 'object') {
+      const itemTypeRaw = Number(raw.itemType ?? -1);
+      const quantityRaw = Number(raw.quantity ?? 0);
+      return {
+        itemType: itemTypeRaw > 0 ? itemTypeRaw : -1,
+        quantity: Number.isFinite(quantityRaw) ? Math.max(0, Math.trunc(quantityRaw)) : 0,
+      };
+    }
+
+    return { itemType: -1, quantity: 0 };
+  }
+
+  function isPotionItem(itemId: number): boolean {
+    return HP_POTION_IDS.has(itemId)
+      || MP_POTION_IDS.has(itemId)
+      || STAT_POTION_IDS.has(itemId)
+      || LIFE_MANA_POTION_IDS.has(itemId);
+  }
+
+  function isHpOrMpPotion(itemId: number): boolean {
+    return HP_POTION_IDS.has(itemId) || MP_POTION_IDS.has(itemId);
+  }
+
+  function packetTouchesQuickslotOrPotion(packet: any): boolean {
+    const data = packet?.data ?? {};
+    const slotObjects = [data.slotObject1, data.slotObject2, data.slotObject].filter(Boolean);
+
+    for (const slotObject of slotObjects) {
+      const slotId = Number(slotObject?.slotId ?? -1);
+      const objectType = Number(slotObject?.objectType ?? -1);
+
+      if (Number.isFinite(slotId) && isQuickslotPacketSlot(slotId)) return true;
+      if (Number.isFinite(objectType) && isPotionItem(objectType)) return true;
+    }
+
+    return false;
+  }
+
+  function suppressHpMpPotionLootAfterManualAction(
+    client: ClientConnection,
+    reason: string,
+    clearPendingAutoLoot = true,
+  ): void {
+    const state = getState(client);
+    const now = Date.now();
+    const pauseMs = Math.max(
+      MIN_MANUAL_POTION_SUPPRESS_MS,
+      Math.min(MAX_MANUAL_POTION_SUPPRESS_MS, Math.trunc(Number(manualPotionSuppressMs) || DEFAULT_MANUAL_POTION_SUPPRESS_MS)),
+    );
+
+    state.manualPotionSuppressUntil = Math.max(state.manualPotionSuppressUntil, now + pauseMs);
+
+    if (clearPendingAutoLoot) {
+      state.pendingDestSlotId = null;
+      state.pendingDestQuantity = null;
+      state.pendingPotionItemId = null;
+      state.pendingSince = 0;
+    }
+
+    state.recentAttempts.clear();
+    state.reservedDestSlots.clear();
+    state.consumedBagSlots.clear();
+
+    if ((now - Number(state.lastManualPotionSuppressLogAt || 0)) >= MANUAL_POTION_SUPPRESS_LOG_MS) {
+      state.lastManualPotionSuppressLogAt = now;
+      ctx.log(`[Manual Potion Guard] Pausing Auto Loot for ${pauseMs}ms after ${reason}`);
+    }
+  }
+
+  function isPendingHpMpAutoLootActive(state: AutoLootState, now: number): boolean {
+    return state.pendingPotionItemId != null
+      && state.pendingDestSlotId != null
+      && (now - Number(state.pendingSince || 0)) < PENDING_DEST_TIMEOUT_MS;
+  }
+  function getManualPotionPacketBlockMs(): number {
+    return Math.max(
+      MIN_MANUAL_POTION_PACKET_BLOCK_MS,
+      Math.min(
+        MAX_MANUAL_POTION_PACKET_BLOCK_MS,
+        Math.trunc(Number(manualPotionPacketBlockMs) || DEFAULT_MANUAL_POTION_PACKET_BLOCK_MS),
+      ),
+    );
+  }
+    function blockManualPotionPacketDuringPendingAutoLoot(
+    client: ClientConnection,
+    packetName: string,
+  ): void {
+    const state = getState(client);
+    const now = Date.now();
+
+    // Important:
+    // Do NOT extend manualPotionPacketBlockUntil here.
+    // The deadline is set once when Auto Loot sends the HP/MP swap.
+    // Extending it on every blocked manual packet can desync the client during spam.
+    const blockMs = getManualPotionPacketBlockMs();
+    const remainingMs = Math.max(
+      0,
+      Math.ceil(Number(state.manualPotionPacketBlockUntil || 0) - now),
+    );
+
+    suppressHpMpPotionLootAfterManualAction(client, packetName, false);
+
+    if ((now - Number(state.lastManualPotionPacketBlockLogAt || 0)) >= MANUAL_POTION_PACKET_BLOCK_LOG_MS) {
+      state.lastManualPotionPacketBlockLogAt = now;
+      ctx.log(
+        `[Manual Potion Guard] Blocked ${packetName} for ${remainingMs > 0 ? remainingMs : blockMs}ms ` +
+        `while pending Auto Loot potion swap settles`,
+      );
+    }
   }
 
   function getPlayerSlotObjectType(client: ClientConnection, packetSlotId: number): number {
@@ -627,47 +827,91 @@ export function register(ctx: PluginContext) {
     if (packetSlotId >= 12 && packetSlotId <= 27) {
       return Number(client.playerData.backpack[packetSlotId - 12] ?? -1);
     }
-    if (packetSlotId >= QUICKSLOT_PACKET_BASE && packetSlotId < (QUICKSLOT_PACKET_BASE + QUICK_SLOT_COUNT)) {
-      return Number(client.playerData.quickSlots[packetSlotId - QUICKSLOT_PACKET_BASE] ?? -1);
+    if (isQuickslotPacketSlot(packetSlotId)) {
+      return readQuickSlot(client, packetSlotId - QUICKSLOT_PACKET_BASE).itemType;
     }
     return -1;
   }
 
   function getQuickslotDestination(client: ClientConnection, itemId: number): LootDestination | null {
     const info = catalog.items.get(itemId);
-    if (!info?.quickslotAllowed) return null;
+    if (info && info.quickslotAllowed !== true) return null;
 
-    const isHpPot = HP_POTION_IDS.has(itemId);
-    const isMpPot = MP_POTION_IDS.has(itemId);
+    if (!HP_POTION_IDS.has(itemId) && !MP_POTION_IDS.has(itemId)) return null;
 
-    for (let slot = 0; slot < QUICK_SLOT_COUNT; slot++) {
-      const objectType = Number(client.playerData.quickSlots[slot] ?? -1);
-      if (objectType !== itemId) continue;
-      // Skip if stack is already maxed — swapping into a full stack DCs the client.
-      if (isHpPot && client.playerData.healthStackCount >= MAX_HP_QUICKSLOT_STACK) continue;
-      if (isMpPot && client.playerData.magicStackCount >= MAX_MP_QUICKSLOT_STACK) continue;
-      return { packetSlotId: QUICKSLOT_PACKET_BASE + slot, currentObjectType: objectType };
-    }
+    const maxStack = HP_POTION_IDS.has(itemId)
+      ? MAX_HP_QUICKSLOT_STACK
+      : MAX_MP_QUICKSLOT_STACK;
+
+    let existingSlot = -1;
+    let existingQuantity = 0;
+    let firstEmptySlot = -1;
 
     for (let slot = 0; slot < QUICK_SLOT_COUNT; slot++) {
-      const objectType = Number(client.playerData.quickSlots[slot] ?? -1);
-      if (objectType === -1) {
-        return { packetSlotId: QUICKSLOT_PACKET_BASE + slot, currentObjectType: -1 };
+      const current = readQuickSlot(client, slot);
+
+      if (current.itemType === itemId) {
+        existingSlot = slot;
+        existingQuantity = current.quantity;
+        break;
+      }
+
+      if (current.itemType === -1 && firstEmptySlot < 0) {
+        firstEmptySlot = slot;
       }
     }
 
+    if (existingSlot >= 0) {
+      // Stack only when the real per-slot stackCount is known and below cap.
+      if (existingQuantity > 0 && existingQuantity < maxStack) {
+        return {
+          packetSlotId: QUICKSLOT_PACKET_BASE + existingSlot,
+          currentObjectType: itemId,
+        };
+      }
+
+      // Existing HP/MP quickslot is full or quantity is unknown. Do not create
+      // duplicate HP/MP stacks in other empty quickslots.
+      return null;
+    }
+
+    if (firstEmptySlot >= 0) {
+      return {
+        packetSlotId: QUICKSLOT_PACKET_BASE + firstEmptySlot,
+        currentObjectType: -1,
+      };
+    }
+
     return null;
+  }
+
+  function getExpectedQuickslotQuantity(client: ClientConnection, destination: LootDestination, itemId: number): number | null {
+    if (!isQuickslotPacketSlot(destination.packetSlotId)) return null;
+    if (!HP_POTION_IDS.has(itemId) && !MP_POTION_IDS.has(itemId)) return null;
+
+    const quickslotIndex = destination.packetSlotId - QUICKSLOT_PACKET_BASE;
+    const current = readQuickSlot(client, quickslotIndex);
+    const maxStack = HP_POTION_IDS.has(itemId)
+      ? MAX_HP_QUICKSLOT_STACK
+      : MAX_MP_QUICKSLOT_STACK;
+
+    if (current.itemType !== itemId || current.quantity <= 0) return 1;
+    return Math.min(maxStack, current.quantity + 1);
   }
 
   function getFirstFreeLootDestination(
     client: ClientConnection,
     allowBackpack: boolean,
     backpackFirst: boolean,
+    state: AutoLootState,
+    now: number,
   ): LootDestination | null {
     const tryInventory = (): LootDestination | null => {
       for (let slot = 4; slot <= 11; slot++) {
         const objectType = Number(client.playerData.inventory[slot] ?? -1);
-        if (objectType === -1) return { packetSlotId: slot, currentObjectType: -1 };
+        if (objectType !== -1) continue;
+        if (isReservedDestination(state, slot, now)) continue;
+        return { packetSlotId: slot, currentObjectType: -1 };
       }
       return null;
     };
@@ -675,8 +919,11 @@ export function register(ctx: PluginContext) {
     const tryBackpack = (): LootDestination | null => {
       if (!allowBackpack || !client.playerData.hasBackpack) return null;
       for (let slot = 0; slot < 16; slot++) {
+        const packetSlotId = 12 + slot;
         const objectType = Number(client.playerData.backpack[slot] ?? -1);
-        if (objectType === -1) return { packetSlotId: 12 + slot, currentObjectType: -1 };
+        if (objectType !== -1) continue;
+        if (isReservedDestination(state, packetSlotId, now)) continue;
+        return { packetSlotId, currentObjectType: -1 };
       }
       return null;
     };
@@ -804,10 +1051,11 @@ export function register(ctx: PluginContext) {
         const tierU = String(rawObj.tierStr ?? '').trim().toUpperCase();
         if (isMultitoolUtTier(tierU, st) && st !== 10 && st !== 26) return true;
       }
-      if (rawObj) {
-        const tier = String(rawObj.tierStr ?? '').trim().toUpperCase();
-        ctx.dashboardLog(`[DEBUG] 0x${itemId.toString(16)} "${rawObj.id}" not in catalog — tierStr="${tier}" slotType=${rawObj.slotType}`);
-      }
+      // DEBUG: item present in raw game data but missing from Auto Loot catalog.
+      // if (rawObj) {
+      //   const tier = String(rawObj.tierStr ?? '').trim().toUpperCase();
+      //   ctx.dashboardLog(`[DEBUG] 0x${itemId.toString(16)} "${rawObj.id}" not in catalog tierStr="${tier}" slotType=${rawObj.slotType}`);
+      // }
       return false;
     }
 
@@ -815,9 +1063,21 @@ export function register(ctx: PluginContext) {
     if (lootEggs && info.name.endsWith(' Egg')) return true;
 
     if (info.isUT) {
-      if (!lootUTs) return false;
+      if (!lootUTs) {
+        // DEBUG:
+        // ctx.log(`[Auto Loot UT DEBUG] rejected="${info.name}" id=${itemId} reason=lootUTsDisabled`);
+        return false;
+      }
+
       const result = info.slotType !== 10 && info.slotType !== 26;
-      if (!result) ctx.dashboardLog(`[DEBUG] Skipping UT "${info.name}" — excluded slotType ${info.slotType}`);
+
+      // DEBUG:
+      // if (!result) {
+      //   ctx.log(`[Auto Loot UT DEBUG] rejected="${info.name}" id=${itemId} reason=excludedSlotType slotType=${info.slotType}`);
+      // } else {
+      //   ctx.log(`[Auto Loot UT DEBUG] accepted="${info.name}" id=${itemId} slotType=${info.slotType}`);
+      // }
+
       return result;
     }
 
@@ -930,7 +1190,17 @@ export function register(ctx: PluginContext) {
     bagSlot: number,
     itemId: number,
     destination: LootDestination,
-  ): void {
+  ): boolean {
+    const state = getState(client);
+    const now = Date.now();
+
+    // Safety: after a manual potion/quickslot action, pause all Auto Loot swaps.
+    // Even non-potion swaps can collide with unsettled inventory state if the
+    // player just moved/dropped stacked quickslot potions.
+    if (now < Number(state.manualPotionSuppressUntil || 0)) {
+      return false;
+    }
+
     const packet = ctx.createPacket('INVENTORYSWAP');
     packet.data.time = Math.trunc(client.time);
     packet.data.position = {
@@ -949,6 +1219,7 @@ export function register(ctx: PluginContext) {
     };
     packet.modified = true;
     client.sendToServer(packet);
+    return true;
   }
 
   function sendPlayerSwap(
@@ -977,25 +1248,10 @@ export function register(ctx: PluginContext) {
     client.sendToServer(packet);
   }
 
-  function findQuickslotRestockMove(client: ClientConnection): { fromPacketSlotId: number; itemId: number; destination: LootDestination } | null {
-    for (let slot = 4; slot <= 11; slot++) {
-      const itemId = Number(client.playerData.inventory[slot] ?? -1);
-      if (!Number.isFinite(itemId) || itemId <= 0) continue;
-      const destination = getQuickslotDestination(client, itemId);
-      if (!destination) continue;
-      return { fromPacketSlotId: slot, itemId, destination };
-    }
-
-    if (!client.playerData.hasBackpack) return null;
-
-    for (let slot = 0; slot < 16; slot++) {
-      const itemId = Number(client.playerData.backpack[slot] ?? -1);
-      if (!Number.isFinite(itemId) || itemId <= 0) continue;
-      const destination = getQuickslotDestination(client, itemId);
-      if (!destination) continue;
-      return { fromPacketSlotId: 12 + slot, itemId, destination };
-    }
-
+  function findQuickslotRestockMove(_client: ClientConnection): { fromPacketSlotId: number; itemId: number; destination: LootDestination } | null {
+    // SAFETY: player inventory/backpack -> quickslot INVENTORYSWAP can desync
+    // while the player is manually dragging/dropping stacked potions. Bag/ground
+    // -> quickslot autoloot is handled separately and remains enabled.
     return null;
   }
 
@@ -1016,10 +1272,23 @@ export function register(ctx: PluginContext) {
     if (disableWhenIdle && state.stationaryTicks > STATIONARY_TICK_LIMIT) return;
 
     if (state.pendingDestSlotId != null) {
-      const current = getPlayerSlotObjectType(client, state.pendingDestSlotId);
-      if (current !== -1 || (now - state.pendingSince) >= PENDING_DEST_TIMEOUT_MS) {
-        state.pendingDestSlotId = null;
-        state.pendingSince = 0;
+      if (isQuickslotPacketSlot(state.pendingDestSlotId) && state.pendingDestQuantity != null) {
+        const quickslotIndex = state.pendingDestSlotId - QUICKSLOT_PACKET_BASE;
+        const current = readQuickSlot(client, quickslotIndex);
+        if (current.quantity >= state.pendingDestQuantity || (now - state.pendingSince) >= PENDING_DEST_TIMEOUT_MS) {
+          state.pendingDestSlotId = null;
+          state.pendingDestQuantity = null;
+          state.pendingPotionItemId = null;
+          state.pendingSince = 0;
+        }
+      } else {
+        const current = getPlayerSlotObjectType(client, state.pendingDestSlotId);
+        if (current !== -1 || (now - state.pendingSince) >= PENDING_DEST_TIMEOUT_MS) {
+          state.pendingDestSlotId = null;
+          state.pendingDestQuantity = null;
+          state.pendingPotionItemId = null;
+          state.pendingSince = 0;
+        }
       }
     }
     if (state.pendingDestSlotId != null) return;
@@ -1030,6 +1299,7 @@ export function register(ctx: PluginContext) {
         state.recentAttempts.delete(key);
       }
     }
+    cleanupReservations(state, now);
 
     if (restockQuickSlots) {
       const restock = findQuickslotRestockMove(client);
@@ -1037,9 +1307,12 @@ export function register(ctx: PluginContext) {
         const attemptKey = `restock:${restock.fromPacketSlotId}:${restock.itemId}:${restock.destination.packetSlotId}`;
         const lastAttempt = Number(state.recentAttempts.get(attemptKey) || 0);
         if ((now - lastAttempt) >= RETRY_ITEM_AFTER_MS) {
+          const expectedQuantity = getExpectedQuickslotQuantity(client, restock.destination, restock.itemId);
           sendPlayerSwap(client, restock.fromPacketSlotId, restock.itemId, restock.destination);
           state.lastPickupAt = now;
           state.pendingDestSlotId = restock.destination.packetSlotId;
+          state.pendingDestQuantity = expectedQuantity;
+          state.pendingPotionItemId = isHpOrMpPotion(restock.itemId) ? restock.itemId : null;
           state.pendingSince = now;
           state.recentAttempts.set(attemptKey, now);
           return;
@@ -1047,7 +1320,7 @@ export function register(ctx: PluginContext) {
       }
     }
 
-    const generalDestination = getFirstFreeLootDestination(client, useBackpack, preferBackpack);
+    const generalDestination = getFirstFreeLootDestination(client, useBackpack, preferBackpack, state, now);
 
     const bags = getNearbyBags(client, state);
     for (const bag of bags) {
@@ -1057,6 +1330,16 @@ export function register(ctx: PluginContext) {
 
       for (let bagSlot = 0; bagSlot < 8; bagSlot++) {
         const itemId = getBagItemId(bag, bagSlot);
+        const bagSlotKey = makeBagSlotKey(bag, bagSlot, itemId);
+
+        if (now < Number(state.manualPotionSuppressUntil || 0)) {
+          continue;
+        }
+
+        if (Number(state.consumedBagSlots.get(bagSlotKey) || 0) > now) {
+          continue;
+        }
+
         const isStat = STAT_POTION_IDS.has(itemId);
         if (isStat) {
           if (!canInteractWithStatPotOnBag(itemId)) continue;
@@ -1088,17 +1371,50 @@ export function register(ctx: PluginContext) {
         }
 
         const destination = getQuickslotDestination(client, itemId) ?? generalDestination;
+
+        // DEBUG: UT candidate/destination tracing.
+        // const itemInfoForDebug = catalog.items.get(itemId);
+        // if (itemInfoForDebug?.isUT) {
+        //   ctx.log(
+        //     `[Auto Loot UT DEBUG] candidate="${itemInfoForDebug.name}" ` +
+        //     `id=${itemId} slotType=${itemInfoForDebug.slotType} ` +
+        //     `destination=${destination ? destination.packetSlotId : 'none'} ` +
+        //     `generalDest=${generalDestination ? generalDestination.packetSlotId : 'none'} ` +
+        //     `pending=${state.pendingDestSlotId ?? 'none'} ` +
+        //     `manualSuppressRemaining=${Math.max(0, Number(state.manualPotionSuppressUntil || 0) - now)}ms`,
+        //   );
+        // }
+
         if (!destination) continue;
 
         const attemptKey = `${bag.objectId}:${bagSlot}:${itemId}`;
         const lastAttempt = Number(state.recentAttempts.get(attemptKey) || 0);
         if ((now - lastAttempt) < RETRY_ITEM_AFTER_MS) continue;
 
-        sendLootSwap(client, bag, bagSlot, itemId, destination);
-        state.lastPickupAt = now;
+        const expectedQuantity = getExpectedQuickslotQuantity(client, destination, itemId);
+        const sent = sendLootSwap(client, bag, bagSlot, itemId, destination);
+        if (!sent) continue;
+
+                state.lastPickupAt = now;
         state.pendingDestSlotId = destination.packetSlotId;
+        state.pendingDestQuantity = expectedQuantity;
+        state.pendingPotionItemId = isHpOrMpPotion(itemId) ? itemId : null;
         state.pendingSince = now;
+
+        if (isHpOrMpPotion(itemId)) {
+          const blockMs = getManualPotionPacketBlockMs();
+          state.manualPotionPacketBlockUntil = Math.max(
+            Number(state.manualPotionPacketBlockUntil || 0),
+            now + blockMs,
+          );
+        }
+
         state.recentAttempts.set(attemptKey, now);
+        const shouldReserveForPotionSafety = isHpOrMpPotion(itemId) || isQuickslotPacketSlot(destination.packetSlotId);
+        if (shouldReserveForPotionSafety) {
+          state.reservedDestSlots.set(destination.packetSlotId, now + DEST_SLOT_RESERVE_MS);
+          state.consumedBagSlots.set(bagSlotKey, now + BAG_SLOT_CONSUME_MS);
+        }
         return;
       }
     }
@@ -1109,15 +1425,23 @@ export function register(ctx: PluginContext) {
     state.lastPickupAt = 0;
     state.recentAttempts.clear();
     state.pendingDestSlotId = null;
+    state.pendingDestQuantity = null;
+    state.pendingPotionItemId = null;
     state.pendingSince = 0;
     state.bagSeenAt.clear();
     state.notifiedBagIds.clear();
     state.lastPos = null;
     state.stationaryTicks = 0;
+    state.reservedDestSlots.clear();
+    state.consumedBagSlots.clear();
+    state.manualPotionSuppressUntil = 0;
+    state.lastManualPotionSuppressLogAt = 0;
+    state.manualPotionPacketBlockUntil = 0;
+    state.lastManualPotionPacketBlockLogAt = 0;
   }
 
   /**
-   * Multitool `Class88.method_2` (incoming `UPDATE` → `newObjs`): for each `Bags` object type,
+      * Multitool `Class88.method_2` (incoming `UPDATE` -> `newObjs`): for each `Bags` object type,
    * set numeric `Size` (stat 2) to 175. Only mutates existing Size entries; does not add stats.
    */
   function rewriteBigBagSizeMultitool(
@@ -1151,6 +1475,33 @@ export function register(ctx: PluginContext) {
       if (rewriteBigBagSizeMultitool(obj.status)) changed = true;
     }
     if (changed) packet.modified = true;
+  });
+
+  ctx.hookAllPackets((client, packet, fromClient) => {
+    if (!fromClient) return;
+
+    if (
+      packet.name !== 'INVENTORYSWAP' &&
+      packet.name !== 'INVDROP' &&
+      packet.name !== 'USEITEM'
+    ) {
+      return;
+    }
+
+    if (!packetTouchesQuickslotOrPotion(packet)) return;
+
+    const state = getState(client);
+    const now = Date.now();
+    const pendingHpMpAutoLoot = isPendingHpMpAutoLootActive(state, now);
+    const manualPacketBlockActive = now < Number(state.manualPotionPacketBlockUntil || 0);
+
+    if (pendingHpMpAutoLoot || manualPacketBlockActive) {
+      packet.send = false;
+      blockManualPotionPacketDuringPendingAutoLoot(client, packet.name);
+      return;
+    }
+
+    suppressHpMpPotionLootAfterManualAction(client, packet.name, true);
   });
 
   ctx.hookPacket('NEWTICK', (client) => {
