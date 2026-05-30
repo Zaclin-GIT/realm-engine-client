@@ -200,7 +200,7 @@ static float ReadCollisionMult(void* entityPtr)
         uintptr_t opa = reinterpret_cast<uintptr_t>(op);
         if (opa < 0x10000 || opa > 0x7FFFFFFFFFFFULL) return 1.0f;
         float mult = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(op) + kOffCollisionMult);
-        if (mult != mult || mult <= 0.f || mult > 20.f) return 1.0f;  // NaN / invalid
+        if (mult != mult || mult < 0.f || mult > 20.f) return 1.0f;  // NaN / invalid
         return mult;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return 1.0f;
@@ -216,7 +216,7 @@ static float ReadCollisionMultAlt(void* entityPtr)
         uintptr_t opa = reinterpret_cast<uintptr_t>(op);
         if (opa < 0x10000 || opa > 0x7FFFFFFFFFFFULL) return 1.0f;
         float mult = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(op) + kOffCollisionMult);
-        if (mult != mult || mult <= 0.f || mult > 20.f) return 1.0f;
+        if (mult != mult || mult < 0.f || mult > 20.f) return 1.0f;
         return mult;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return 1.0f;
@@ -1183,7 +1183,7 @@ void TestTAB::Render()
     if (g_overrideGameHitbox) {
         ImGui::Indent(8.f);
         ImGui::SetNextItemWidth(160.f);
-        ImGui::SliderFloat("Multiplier##ghbm", &g_gameHitboxMult, 0.05f, 3.0f, "%.3f x");
+        ImGui::SliderFloat("Multiplier##ghbm", &g_gameHitboxMult, 0.0f, 3.0f, "%.3f x");
         ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.f),
             "  Effective radius: %.4f tiles", 0.2285f * g_gameHitboxMult);
         if (ImGui::Button("Reset to Default##ghbr")) {
@@ -1371,7 +1371,7 @@ namespace TestTAB {
     void SetGameHitboxOverride(bool on, float mult)
     {
         g_overrideGameHitbox = on;
-        g_gameHitboxMult = std::clamp(mult, 0.05f, 3.0f);
+        g_gameHitboxMult = std::clamp(mult, 0.0f, 3.0f);
     }
     float GetGameHitboxMult() { return g_gameHitboxMult; }
     bool  GetGameHitboxOverride() { return g_overrideGameHitbox; }

@@ -28,6 +28,8 @@
 #include "ChatToast.h"
 #include "HwidCapture.h"
 #include "NoclipHook.h"
+#include "keybinds.h"
+#include "gui/tabs/WorldTAB.h"
 
 namespace {
 
@@ -109,6 +111,8 @@ static MouseStateCache mouseCache;
 LRESULT __stdcall dWndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 	if (g_unloading)
 		return CallWindowProc(oWndProc, hWnd, uMsg, wParam, lParam);
+
+	KeyBinds::WndProc(uMsg, wParam, lParam);
 
 	if (uMsg == WM_SIZE) {
 		UpdateCachedClientSize();
@@ -209,12 +213,49 @@ HRESULT __stdcall dPresent(IDXGISwapChain* __this, UINT SyncInterval, UINT Flags
 
 		ImGui::GetIO().MouseDrawCursor = false;
 
-		// Run per-frame logic (overlays always active, no menu).
-		TestTAB::Tick(false);
-		VisualsTAB::Tick(false);
-		CombatTAB::Tick(false);
-		PlayerTAB::Tick(false);
+		// Toggle menu on keybind press.
+		if (KeyBinds::IsKeyPressed(settings.KeyBinds.Toggle_Menu))
+			settings.bShowMenu = !settings.bShowMenu;
+
+		// Run per-frame logic.
+		TestTAB::Tick(settings.bShowMenu);
+		VisualsTAB::Tick(settings.bShowMenu);
+		CombatTAB::Tick(settings.bShowMenu);
+		PlayerTAB::Tick(settings.bShowMenu);
 		DrawFpsOverlayTopCameraRect();
+
+		// Render menu when open.
+		if (settings.bShowMenu) {
+			ImGui::SetNextWindowSize(ImVec2(1000, 36), ImGuiCond_Always);
+			ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+			ImGui::Begin("##MenuBar", nullptr,
+				ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+				ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+				ImGuiWindowFlags_NoSavedSettings);
+
+			static int s_tab = 0;
+			const char* tabs[] = { "World", "Camera", "Player", "Combat", "Visuals", "Test" };
+			for (int i = 0; i < IM_ARRAYSIZE(tabs); i++) {
+				if (i > 0) ImGui::SameLine();
+				if (ImGui::Button(tabs[i])) s_tab = i;
+			}
+			ImGui::End();
+
+			ImGui::SetNextWindowSize(ImVec2(420, 560), ImGuiCond_Always);
+			ImGui::SetNextWindowPos(ImVec2(0, 36), ImGuiCond_Always);
+			ImGui::Begin("##MenuContent", nullptr,
+				ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+				ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+			switch (s_tab) {
+				case 0: WorldTAB::Render();  break;
+				case 1: CameraTAB::Render(); break;
+				case 2: PlayerTAB::Render(); break;
+				case 3: CombatTAB::Render(); break;
+				case 4: VisualsTAB::Render(); break;
+				case 5: TestTAB::Render();   break;
+			}
+			ImGui::End();
+		}
 
 		ChatToast::Render();
 
