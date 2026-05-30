@@ -58,7 +58,6 @@ import { ScriptHost } from './scripts/ScriptHost.js';
 import type { BridgeClientRef } from './scripts/bridge/BridgeDeps.js';
 import { GameWorldState } from './state/GameWorldState.js';
 import { ProjectileTracker } from './state/ProjectileTracker.js';
-// AutoNexusBridge removed — using in-process Auto Nexus plugin instead.
 import { GameDataLoader } from './game-data/GameDataLoader.js';
 import { PluginManager } from './plugins/PluginManager.js';
 import { PacketInspector } from './dev/server/PacketInspector.js';
@@ -357,8 +356,6 @@ async function main() {
 
   const projectileTracker = new ProjectileTracker(gameData, worldState);
   projectileTracker.attach(proxy);
-
-  // AutoNexusBridge removed — plugin handles Auto Nexus in-process now.
 
   const partyRoster = new PartyRosterState();
   partyRoster.attach(proxy);

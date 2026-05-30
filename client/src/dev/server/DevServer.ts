@@ -5206,8 +5206,8 @@ export class DevServer {
    * craft and inject a PLAYERHIT packet on the player's behalf — which
    * (a) keeps the server's hit accounting consistent when the game's
    * own per-tick collision skipped a fast bullet (the "ghost hit"
-   * pattern) and (b) is observed by the existing AutoNexusBridge
-   * outbound-PLAYERHIT hook, giving AutoNexus the pre-damage signal it
+   * pattern) and (b) is observed by the in-process Auto Nexus plugin's
+   * PLAYERHIT handling, giving Auto Nexus the pre-damage signal it
    * would otherwise miss. No-op if no client / no proxy / malformed
    * action — never throw, the DLL fires this on a hot path.
    */
