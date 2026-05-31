@@ -2,7 +2,7 @@
 #include "GhostHit.h"
 #include "../../movement/dodge/ProjectileTracking.h"
 #include "../../../ui/gui/tabs/WorldTAB.h"   // WorldProjectile
-#include "../../../ui/IpcBridge.h"
+#include "IpcBridge.h"
 
 #include <algorithm>
 #include <atomic>

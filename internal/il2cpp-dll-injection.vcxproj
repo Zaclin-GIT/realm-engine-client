@@ -170,9 +170,7 @@
     <ClInclude Include="src\core\ipc\IpcMessages.h" />
     <ClInclude Include="src\core\ipc\IpcSession.h" />
     <ClInclude Include="src\core\ipc\IpcTileState.h" />
-    <ClInclude Include="src\ui\IpcBridge.h" />
     <ClInclude Include="src\core\ipc\Handshake.h" />
-    <ClInclude Include="src\ui\Handshake.h" />
     <ClInclude Include="src\ui\gui\tabs\CameraTAB.h" />
     <ClInclude Include="src\ui\gui\tabs\WorldTAB.h" />
     <ClInclude Include="src\ui\gui\tabs\PlayerTAB.h" />
@@ -238,7 +236,6 @@
     <ClInclude Include="src\bootstrap\main.h" />
     <ClInclude Include="src\core\config\settings.h" />
     <ClInclude Include="src\core\security\xorstr.h" />
-    <ClInclude Include="src\ui\xorstr.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <!--<VCProjectVersion>16.0</VCProjectVersion>-->
