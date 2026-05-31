@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <cstdio>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LocalPlayer — see LocalPlayer.h for design notes.
@@ -133,6 +134,45 @@ void NotifyPtr(void* ptr)
     GameState::NotifyLocalPtr(ptr);
 }
 
+// ── Stat-drift diagnostic dump ──────────────────────────────────────────────
+// Off by default. Set env RE_STAT_DUMP=1 before launching the game to append
+// the memory-resolved player stats to <tmp>\realm-engine-dll-statdump.log at
+// 2 Hz. Pair with the proxy's RE_STAT_DUMP wire dump to confirm whether the
+// memory `defense` field (RuntimeOffsets::Defense, ~0x508) is BASE or EFFECTIVE:
+//   - dll `defense` == wire DEFENSE(21)              → 21 is effective (the
+//     `pd.defense + pd.defenseBonus` add double-counts — the AutoNexus bug)
+//   - dll `defense` == wire DEFENSE(21)+DEFENSE_BOOST(49) → 21 is base.
+// Enabling the dump self-registers a LocalPlayer consumer so the heavy stats
+// (HP/Defense/…) are read even when no other feature is active.
+static void DumpStatsIfEnabled()
+{
+    static int s_enabled = -1;  // -1 = not yet probed, 0 = off, 1 = on
+    if (s_enabled == -1) {
+        char buf[8] = {};
+        const DWORD n = GetEnvironmentVariableA("RE_STAT_DUMP", buf, sizeof(buf));
+        s_enabled = (n == 1 && buf[0] == '1') ? 1 : 0;
+        if (s_enabled == 1) AddConsumer();  // ensure Tick() reads the heavy stats
+    }
+    if (s_enabled != 1 || !s_ptr) return;
+
+    static ULONGLONG s_lastMs = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (now - s_lastMs < 500ULL) return;   // throttle to ~2 Hz
+    s_lastMs = now;
+
+    char path[MAX_PATH] = {};
+    const DWORD len = GetTempPathA(MAX_PATH, path);
+    if (len == 0 || len > MAX_PATH - 40) return;
+    strcat_s(path, "realm-engine-dll-statdump.log");
+
+    FILE* f = nullptr;
+    if (fopen_s(&f, path, "a") != 0 || !f) return;
+    fprintf(f,
+        "{\"ms\":%llu,\"hp\":%d,\"maxHp\":%d,\"defense\":%d,\"maxMp\":%d,\"objType\":%d,\"x\":%.2f,\"y\":%.2f}\n",
+        now, s_hp, s_maxHp, s_defense, s_maxMp, s_objType, s_x, s_y);
+    fclose(f);
+}
+
 void Tick()
 {
     if (!s_getCooldownFn) {
@@ -173,6 +213,8 @@ void Tick()
 
     if (s_ptr)
         ReadFromPtr();
+
+    DumpStatsIfEnabled();
 }
 
 // ── Accessors ─────────────────────────────────────────────────────────────────

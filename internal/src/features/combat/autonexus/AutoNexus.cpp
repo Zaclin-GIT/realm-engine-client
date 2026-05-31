@@ -96,7 +96,15 @@ static bool ReadPlayerStatsCached(int32_t& hp, int32_t& maxHp, int32_t& defense)
 {
     hp      = LocalPlayer::GetHP();
     maxHp   = LocalPlayer::GetMaxHP();
-    defense = SharedMemory::GetClientDefense();
+    // Read defense straight from game memory (RuntimeOffsets::Defense, ~0x508)
+    // instead of the client-pushed `clientDefense`, which was reconstructed from
+    // wire stats as `pd.defense + pd.defenseBonus` and double-counted the gear
+    // boost (over-stated defense → nexus fired too late). The memory value is the
+    // game's own field: if it's effective (gear-included) this is exactly correct;
+    // if it's base-only it under-states defense → nexus fires earlier (safe).
+    // Either way it can't get you killed the way the double-counted value did.
+    // Confirm base-vs-effective via RE_STAT_DUMP.
+    defense = LocalPlayer::GetDefense();
     return LocalPlayer::GetPtr() != nullptr;
 }
 
