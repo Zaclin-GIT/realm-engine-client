@@ -1,3 +1,14 @@
+// Purpose: owns the DLL-side named-pipe bridge loop and keeps the public
+// IpcBridge_* API stable while delegating extracted responsibilities to focused
+// IPC, feature-state, runtime, and tile-state modules.
+
+// Helpful notes:
+// - This DLL is the pipe client; the Node/Electron side is the pipe server.
+// - Authentication, heartbeat, and signed command sequencing share s_auth.
+// - Per-frame feature application lives in FeatureRuntime; this file only
+//   accepts pipe commands, publishes player/diagnostic events, and reconnects.
+// - Legacy IpcBridge_* accessors intentionally remain as compatibility shims.
+
 #include "pch-il2cpp.h"
 #include "IpcBridge.h"
 #include "Handshake.h"
@@ -26,7 +37,6 @@
 #include "IpcMessages.h"
 #include "IpcSession.h"
 #include "FeatureState.h"
-#include "FloatingTextService.h"
 #include "FeatureRuntime.h"
 #include "FeatureCommandRegistry.h"
 
@@ -146,14 +156,6 @@ void IpcBridge_EmitPredictedHit(int ownerObjId, int bulletId)
     std::lock_guard<std::mutex> lk(s_pendingEventsMutex);
     if (s_pendingEvents.size() < kPendingEventsCap) s_pendingEvents.push_back(ev);
 }
-
-
-
-
-
-
-
-
 
 static bool WriteSignedHotkeyEvent(HANDLE hPipe, char* msgBuf, int msgBufSize, const char* pluginId, const char* action, bool value)
 {

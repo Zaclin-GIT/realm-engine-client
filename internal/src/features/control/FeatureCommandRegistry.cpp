@@ -1,3 +1,14 @@
+// Purpose: maps validated IPC feature commands to the concrete feature, GUI, and
+// runtime setters that actually update client behavior.
+
+// Helpful notes:
+// - IpcBridge parses and authenticates setFeature messages before reaching here.
+// - FeatureCommand converts fixed string buffers into bool/int/float/text values.
+// - Some commands update FeatureState for deferred runtime application, while
+//   others call feature modules immediately when that is the established API.
+// - Unknown keys are intentionally treated as applied after all groups are tried;
+//   this keeps the IPC command stream tolerant of client/server version skew.
+
 #include "pch-il2cpp.h"
 #include "IpcBridge.h"
 #include "main.h"
@@ -18,8 +29,6 @@
 #include "FeatureState.h"
 #include "FloatingTextService.h"
 #include "FeatureCommandRegistry.h"
-
-// FeatureCommand methods
 
 bool FeatureCommand::Is(const char* name) const { return strcmp(key, name) == 0; }
 bool FeatureCommand::Bool() const { return strcmp(value, "true") == 0 || strcmp(value, "1") == 0; }

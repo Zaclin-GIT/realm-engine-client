@@ -1,5 +1,15 @@
-#pragma once
+// Purpose: exposes the feature-state getters and setters used as the handoff
+// layer between authenticated IPC commands and runtime feature application.
 
+// Helpful notes:
+// - Callers should use setters instead of touching storage directly so clamping
+//   and side effects stay centralized.
+// - The implementation is atomic and intentionally lightweight for frequent
+//   reads from render/game hooks.
+// - Some settings represent an active flag plus a value, allowing the client to
+//   keep configured values without applying them until enabled.
+
+#pragma once
 #include <cstdint>
 
 namespace FeatureState {

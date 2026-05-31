@@ -1,3 +1,11 @@
+// Purpose: implements the bridge wire framing used on the named pipe.
+
+// Helpful notes:
+// - Every JSON message is prefixed with a 32-bit byte length.
+// - ReadMessage is non-blocking when fewer than four bytes are available and
+//   returns 0 so the bridge loop can continue ticking heartbeats/events.
+// - A negative return means disconnect, malformed length, or pipe read failure.
+
 #include "pch-il2cpp.h"
 #include "IpcFraming.h"
 

@@ -1,5 +1,12 @@
-#pragma once
+// Purpose: session-key, sequence-number, and MAC helpers for authenticated IPC.
 
+// Helpful notes:
+// - DeriveSessionKey binds the session to server/client challenges, user id,
+//   client pid, and pipe name.
+// - ComputeSessionMacHex signs outbound payloads with the derived session key.
+// - VerifyClientSeqAndMac is the inbound command gate used by bridge dispatch.
+
+#pragma once
 #include <cstdint>
 
 namespace Handshake { struct AuthState; }

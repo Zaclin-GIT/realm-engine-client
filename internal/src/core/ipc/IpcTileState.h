@@ -1,5 +1,13 @@
-#pragma once
+// Purpose: thread-safe tile walkability state populated from IPC tile messages.
 
+// Helpful notes:
+// - IsWalkable returns true for unknown/out-of-range tiles by design.
+// - InitNoWalkTypes and ApplyTileUpdate mutate the shared state using compact
+//   space-delimited payloads parsed in place.
+// - CopyUniqueTypeEntries supports diagnostics without exposing internal maps.
+
+
+#pragma once
 #include <cstdint>
 
 struct IpcTileTypeEntry;

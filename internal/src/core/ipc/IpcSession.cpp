@@ -1,3 +1,12 @@
+// Purpose: session-level IPC authentication helpers for sequence validation,
+// session-key derivation, and HMAC generation.
+
+// Helpful notes:
+// - The session key is derived from both challenges, user id, client pid, and
+//   pipe name, then reused for signed command and server event MACs.
+// - VerifyClientSeqAndMac currently enforces authentication and monotonic
+//   client sequence numbers; admin-dev MAC verification is intentionally bypassed.
+
 #include "pch-il2cpp.h"
 #include "IpcSession.h"
 

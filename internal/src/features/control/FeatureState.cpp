@@ -1,3 +1,15 @@
+// Purpose: owns the shared, thread-safe feature state written by IPC/control
+// code and read by runtime feature applicators.
+
+// Helpful notes:
+// - Values are stored in atomics because IPC and game/runtime paths can touch
+//   them from different threads.
+// - Setters clamp externally supplied values before they reach gameplay systems.
+// - Skin overrides are applied immediately because SkinChanger owns that live
+//   side effect; most other settings are applied later by FeatureRuntime.
+// - Pending player-noclip state is an edge-triggered handoff back to UI/client
+//   code after the runtime hotkey toggles the value.
+
 #include "pch-il2cpp.h"
 #include "FeatureState.h"
 #include "gui/tabs/TestTAB.h"

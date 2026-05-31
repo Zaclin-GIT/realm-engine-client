@@ -1,3 +1,13 @@
+// Purpose: stores the client-provided tile map and no-walk tile type set used
+// by movement and diagnostics through the public IpcBridge tile APIs.
+
+// Helpful notes:
+// - Unknown tiles are treated as walkable to avoid blocking movement on missing
+//   client data.
+// - clearTiles, noWalkInit, and tileUpdate messages mutate this state on the
+//   pipe thread; reads are protected by the same mutex.
+// - Tile keys pack 16-bit x/y coordinates into a single uint32_t.
+
 #include "pch-il2cpp.h"
 #include <algorithm>
 #include <cmath>

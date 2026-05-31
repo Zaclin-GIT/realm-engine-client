@@ -1,3 +1,12 @@
+// Purpose: builds the JSON messages sent from the injected DLL to the client.
+
+// Helpful notes:
+// - Most outbound messages are signed by the caller before construction.
+// - Player messages read from LocalPlayer at send time so heartbeat/player push
+//   cadence stays independent from render-thread feature application.
+// - BuildPlayerSigPayload must stay in sync with BuildPlayer fields covered by
+//   the session MAC.
+
 #include "pch-il2cpp.h"
 #include "IpcMessages.h"
 

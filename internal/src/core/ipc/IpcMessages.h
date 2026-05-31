@@ -1,5 +1,11 @@
-#pragma once
+// Purpose: JSON builders for all DLL-to-client IPC message types.
 
+// Helpful notes:
+// - Callers own output buffers and pass sequence/MAC values for signed messages.
+// - BuildPlayerSigPayload produces the canonical payload string used when
+//   signing player updates.
+
+#pragma once
 #include <cstdint>
 
 namespace IpcMessages {

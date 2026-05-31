@@ -1,5 +1,14 @@
-#pragma once
+// Purpose: public DLL-side IPC bridge contract used by hooks, features, and UI
+// code that need named-pipe state without depending on the bridge internals.
 
+// Helpful notes:
+// - IpcBridgeThread runs the pipe client loop and owns IPC session lifetime.
+// - Feature accessors are compatibility shims over FeatureState.
+// - Tile APIs expose the latest tileUpdate/noWalkInit state from the client.
+// - IpcBridge_ApplyFeatureOverrides is retained for legacy callers; new render
+//   code can call FeatureRuntime directly.
+
+#pragma once
 #include <Windows.h>
 #include <cstdint>
 

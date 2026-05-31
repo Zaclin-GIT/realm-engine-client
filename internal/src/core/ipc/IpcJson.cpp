@@ -1,3 +1,11 @@
+// Purpose: small, allocation-free JSON token helpers for the constrained bridge
+// message shapes exchanged with the Electron client.
+
+// Helpful notes:
+// - These helpers are intentionally not a general JSON parser.
+// - They assume compact bridge messages with known keys and simple scalar values.
+// - String values are copied into caller-owned fixed buffers and truncated safely.
+
 #include "pch-il2cpp.h"
 #include "IpcJson.h"
 

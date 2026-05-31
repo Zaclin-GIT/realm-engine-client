@@ -1,3 +1,14 @@
+// Purpose: applies feature state changes on the game/runtime side once the IPC
+// bridge has accepted commands and stored them in FeatureState.
+
+// Helpful notes:
+// - FeatureState is the thread-safe handoff point from IPC/control code.
+// - This file talks to live gameplay systems, GUI tabs, hooks, and services.
+// - ApplyOverrides is called repeatedly, so each helper caches the last applied
+//   values to avoid reapplying unchanged settings every frame.
+// - Hotkey polling is gated to the foreground game process before firing events.
+
+
 #include "pch-il2cpp.h"
 #include "FeatureRuntime.h"
 #include "FeatureState.h"
