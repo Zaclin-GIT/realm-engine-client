@@ -2,7 +2,7 @@
 #include "FeatAutoAim.h"
 #include "AutoAim.h"
 #include "ProjNoclip.h"
-#include "IpcBridge.h"
+#include "FeatureState.h"
 #include <imgui/imgui.h>
 
 namespace CombatTAB {
@@ -24,8 +24,8 @@ static float s_rangeLeadBias        = 1.f;
 
 void Tick(bool /*menuOpen*/)
 {
-    s_aimEnabled    = IpcBridge_GetAutoAimEnabled();
-    s_aimMode       = IpcBridge_GetAutoAimMode();
+    s_aimEnabled    = FeatureState::GetAutoAimEnabled();
+    s_aimMode       = FeatureState::GetAutoAimMode();
     s_noclipEnabled = ProjNoclip::IsEnabled();
 
     s_shootInvulnerable   = AutoAim::IsShootInvulnerable();
@@ -48,23 +48,23 @@ void Render()
     ImGui::Spacing();
 
     if (ImGui::Checkbox("Enable##aaEnable", &s_aimEnabled))
-        IpcBridge_SetAutoAimEnabled(s_aimEnabled);
+        FeatureState::SetAutoAimEnabled(s_aimEnabled);
 
     ImGui::Spacing();
     ImGui::TextDisabled("Aim mode (Multitool AutoAimMode)");
     if (ImGui::RadioButton("Closest to player##aaMode0", s_aimMode == 0)) {
         s_aimMode = 0;
-        IpcBridge_SetAutoAimMode(0);
+        FeatureState::SetAutoAimMode(0);
         AutoAim::SetAimMode(AutoAim::AimMode::ClosestToPlayer);
     }
     if (ImGui::RadioButton("Highest HP##aaMode1", s_aimMode == 1)) {
         s_aimMode = 1;
-        IpcBridge_SetAutoAimMode(1);
+        FeatureState::SetAutoAimMode(1);
         AutoAim::SetAimMode(AutoAim::AimMode::HighestHP);
     }
     if (ImGui::RadioButton("Closest to mouse##aaMode2", s_aimMode == 2)) {
         s_aimMode = 2;
-        IpcBridge_SetAutoAimMode(2);
+        FeatureState::SetAutoAimMode(2);
         AutoAim::SetAimMode(AutoAim::AimMode::ClosestToMouse);
     }
 

@@ -8,7 +8,7 @@
 #include "W2S.h"
 #include "Il2CppResolver.h"
 #include "DirectX.h"
-#include "IpcBridge.h"
+#include "FeatureState.h"
 #include "DbgFileLog.h"
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
@@ -429,14 +429,14 @@ void CameraTAB::Render()
     // ── CENTERING (IOABMGFJLLP / Toggle Centering of Player) ──────────────────
     ImGui::TextColored(ImVec4(0.8f, 0.6f, 1.0f, 1.0f), "CENTERING  (IOABMGFJLLP)");
     ImGui::Indent(8.f);
-    bool centeringActive = IpcBridge_GetCameraCenteringActive();
-    bool centeredOnPlayer = IpcBridge_GetCameraCentered();
+    bool centeringActive = FeatureState::GetCameraCenteringActive();
+    bool centeredOnPlayer = FeatureState::GetCameraCentered();
     if (ImGui::Checkbox("Force centering##cam_force_center", &centeringActive))
-        IpcBridge_SetCameraCentering(centeringActive, centeredOnPlayer);
+        FeatureState::SetCameraCentering(centeringActive, centeredOnPlayer);
     if (centeringActive) {
         ImGui::SameLine();
         if (ImGui::Checkbox("Centered on player##cam_centered", &centeredOnPlayer))
-            IpcBridge_SetCameraCentering(true, centeredOnPlayer);
+            FeatureState::SetCameraCentering(true, centeredOnPlayer);
     }
     {
         const char* modeLabel = g_offsetMode ? "OFF  (player NOT centred)" : "ON  (following player)";
@@ -448,7 +448,7 @@ void CameraTAB::Render()
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.40f, 0.25f, 0.60f, 1.f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.18f, 0.10f, 0.28f, 1.f));
     if (ImGui::Button("Toggle Centering"))
-        IpcBridge_SetCameraCentering(true, g_offsetMode != 0);
+        FeatureState::SetCameraCentering(true, g_offsetMode != 0);
     ImGui::PopStyleColor(3);
     ImGui::SameLine();
     ImGui::TextDisabled("(calls ChangeOffsetMode() — same as H key)");
@@ -473,22 +473,22 @@ void CameraTAB::Render()
     // ── ANGLE ─────────────────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(0.4f,1.f,0.7f,1.f), "ANGLE  (Transform.eulerAngles.z — degrees)");
     ImGui::Indent(8.f);
-    bool angleActive = IpcBridge_GetCameraAngleActive();
-    int angleValue = IpcBridge_GetCameraAngleValue();
+    bool angleActive = FeatureState::GetCameraAngleActive();
+    int angleValue = FeatureState::GetCameraAngleValue();
     if (ImGui::Checkbox("Lock angle##cam_lock_angle", &angleActive))
-        IpcBridge_SetCameraAngle(angleActive, angleValue);
+        FeatureState::SetCameraAngle(angleActive, angleValue);
     ImGui::Text("Current: %.4f", g_angle);
     ImGui::Spacing();
     ImGui::SetNextItemWidth(100.f);
     if (ImGui::InputInt("##angleInput", &angleValue, 1, 10)) {
         g_setAngle = angleValue;
-        IpcBridge_SetCameraAngle(angleActive, angleValue);
+        FeatureState::SetCameraAngle(angleActive, angleValue);
     }
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.15f,0.4f,0.15f,1.f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.6f,0.2f, 1.f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.1f, 0.25f,0.1f,1.f));
-    if (ImGui::Button("Set Angle")) IpcBridge_SetCameraAngle(true, angleValue);
+    if (ImGui::Button("Set Angle")) FeatureState::SetCameraAngle(true, angleValue);
     ImGui::PopStyleColor(3);
     ImGui::SameLine();
     ImGui::TextDisabled("(calls SetCameraAngle(int))");
@@ -501,22 +501,22 @@ void CameraTAB::Render()
     // ── ZOOM ──────────────────────────────────────────────────────────────────
     ImGui::TextColored(ImVec4(1.f,0.6f,0.3f,1.f), "ZOOM  (orthographicSize — smaller = closer)");
     ImGui::Indent(8.f);
-    bool zoomActive = IpcBridge_GetCameraZoomActive();
-    float zoomValue = IpcBridge_GetCameraZoomValue();
+    bool zoomActive = FeatureState::GetCameraZoomActive();
+    float zoomValue = FeatureState::GetCameraZoomValue();
     if (ImGui::Checkbox("Lock zoom##cam_lock_zoom", &zoomActive))
-        IpcBridge_SetCameraZoom(zoomActive, zoomValue);
+        FeatureState::SetCameraZoom(zoomActive, zoomValue);
     ImGui::Text("Current: %.4f", g_zoom);
     ImGui::Spacing();
     ImGui::SetNextItemWidth(100.f);
     if (ImGui::DragFloat("##zoomInput", &zoomValue, 0.1f, 0.5f, 100.f, "%.2f")) {
         g_setZoom = zoomValue;
-        IpcBridge_SetCameraZoom(zoomActive, zoomValue);
+        FeatureState::SetCameraZoom(zoomActive, zoomValue);
     }
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.4f,0.2f,0.05f,1.f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.6f,0.3f,0.1f, 1.f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.25f,0.12f,0.02f,1.f));
-    if (ImGui::Button("Set Zoom")) IpcBridge_SetCameraZoom(true, zoomValue);
+    if (ImGui::Button("Set Zoom")) FeatureState::SetCameraZoom(true, zoomValue);
     ImGui::PopStyleColor(3);
     ImGui::SameLine();
     ImGui::TextDisabled("(writes orthographicSize)");
@@ -535,7 +535,7 @@ void CameraTAB::Render()
         if (i > 0) ImGui::SameLine();
         if (ImGui::Button(lbl)) {
             g_setAngle = presets[i];
-            IpcBridge_SetCameraAngle(true, presets[i]);
+            FeatureState::SetCameraAngle(true, presets[i]);
         }
     }
     ImGui::Unindent(8.f);
@@ -551,7 +551,7 @@ void CameraTAB::Render()
         if (i > 0) ImGui::SameLine();
         if (ImGui::Button(lbl)) {
             g_setZoom = zPresets[i];
-            IpcBridge_SetCameraZoom(true, zPresets[i]);
+            FeatureState::SetCameraZoom(true, zPresets[i]);
         }
     }
     ImGui::Unindent(8.f);

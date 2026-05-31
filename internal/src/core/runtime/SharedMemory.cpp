@@ -1,7 +1,7 @@
 #include "pch-il2cpp.h"
 #include "SharedMemory.h"
 #include "LocalPlayer.h"
-#include "IpcBridge.h"
+#include "FeatureState.h"
 
 #include <Windows.h>
 #include <cmath>
@@ -82,7 +82,7 @@ void Tick()
 
 int32_t GetClientDefense()
 {
-    const int32_t bridged = IpcBridge_GetClientDefense();
+    const int32_t bridged = FeatureState::GetClientDefense();
     if (bridged != kDefenseUnset)
         return bridged;
     if (!s_blob || s_blob->magic != kMagic)
@@ -100,7 +100,7 @@ void SetNeedsNexus(bool v)
 
 int32_t GetClientClassType()
 {
-    const int32_t bridged = IpcBridge_GetClientClassType();
+    const int32_t bridged = FeatureState::GetClientClassType();
     if (bridged != 0)
         return bridged;
     if (!s_blob || s_blob->magic != kMagic)

@@ -23,7 +23,7 @@ using TestTAB::DodgeMode;
 #include "RuntimeOffsets.h"
 #include "GameState.h"
 #include "LocalPlayer.h"
-#include "IpcBridge.h"
+#include "FeatureState.h"
 #include "SpeedHack.h"
 #include "Noclip.h"
 #include <imgui/imgui.h>
@@ -797,12 +797,12 @@ void TestTAB::Tick(bool menuVisible)
                 float dx = g_walkX - camX;
                 float dy = g_walkY - camY;
                 if (sqrtf(dx * dx + dy * dy) < 0.15f) {
-                    IpcBridge_SetWalkTarget(g_walkX, g_walkY, false);
+                    FeatureState::SetWalkTarget(g_walkX, g_walkY, false);
                 } else {
                     MovePlayer(g_walkX, g_walkY, dt, camX, camY, localPlayer);
                 }
             } else {
-                IpcBridge_SetWalkTarget(g_walkX, g_walkY, false);
+                FeatureState::SetWalkTarget(g_walkX, g_walkY, false);
             }
         }
         else if (!dodgeMoved && !dodgeHandlesNav && g_followMouse && !menuVisible && g_w2sValid && localPlayer) {
@@ -952,7 +952,7 @@ void TestTAB::RenderMovementSection()
     ImGui::SetNextItemWidth(240.f);
     if (ImGui::Combo("Mode##dodgeModeCombo", &modeIdx, modeLabels, IM_ARRAYSIZE(modeLabels))) {
         ApplyDodgeModeWithEnter(static_cast<DodgeMode>(modeIdx));
-        IpcBridge_SetAutoDodgeMode(modeIdx);
+        FeatureState::SetAutoDodgeMode(modeIdx);
     }
 
     ImGui::Spacing();
@@ -1220,14 +1220,14 @@ void TestTAB::Render()
     ImGui::SetNextItemWidth(90.f);
     const bool walkYChanged = ImGui::InputFloat("Y##wty", &g_walkY, 0.f, 0.f, "%.1f");
     if ((walkXChanged || walkYChanged) && g_walkActive)
-        IpcBridge_SetWalkTarget(g_walkX, g_walkY, true);
+        FeatureState::SetWalkTarget(g_walkX, g_walkY, true);
 
     ImGui::Spacing();
 
     if (g_walkActive) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.15f, 0.15f, 1.f));
         if (ImGui::Button("Stop##wtstop", ImVec2(90.f, 0.f)))
-            IpcBridge_SetWalkTarget(g_walkX, g_walkY, false);
+            FeatureState::SetWalkTarget(g_walkX, g_walkY, false);
         ImGui::PopStyleColor();
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(1.f, 0.8f, 0.2f, 1.f),
@@ -1235,7 +1235,7 @@ void TestTAB::Render()
     } else {
         if (ImGui::Button("Walk To##wtgo", ImVec2(90.f, 0.f))) {
             WorldTAB::ForceRefresh();
-            IpcBridge_SetWalkTarget(g_walkX, g_walkY, true);
+            FeatureState::SetWalkTarget(g_walkX, g_walkY, true);
         }
     }
 
@@ -1261,7 +1261,7 @@ void TestTAB::Render()
             WorldTAB::ForceRefresh();
             float ex = 0.f, ey = 0.f;
             if (WorldTAB::GetEntityLivePos(oid, ex, ey)) {
-                IpcBridge_SetWalkTarget(ex, ey, true);
+                FeatureState::SetWalkTarget(ex, ey, true);
                 snprintf(g_walkObjStatus, sizeof(g_walkObjStatus),
                     "Walking to #%d  (%.1f, %.1f)", oid, ex, ey);
             } else {

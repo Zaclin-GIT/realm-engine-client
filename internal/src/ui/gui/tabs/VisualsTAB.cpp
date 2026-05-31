@@ -9,7 +9,7 @@
 #include "Il2CppResolver.h"
 #include "RuntimeOffsets.h"
 #include "SkinChanger.h"
-#include "IpcBridge.h"
+#include "FeatureState.h"
 #include "SkinDatabase.h"
 
 // All field offsets are resolved centrally by RuntimeOffsets::EnsureAll()
@@ -152,8 +152,8 @@ void Render()
         "Legacy skin UI; re-applies on map change.");
 
     {
-        bool overrideOn = IpcBridge_GetSkinOverrideEnabled();
-        int skinOverrideId = IpcBridge_GetSkinOverrideId();
+        bool overrideOn = FeatureState::GetSkinOverrideEnabled();
+        int skinOverrideId = FeatureState::GetSkinOverrideId();
 
         if (!haveLocal) {
             ImGui::TextDisabled("  (need local player — will auto-resolve on realm entry)");
@@ -166,16 +166,16 @@ void Render()
 
         ImGui::SetNextItemWidth(160.f);
         if (ImGui::InputInt("Skin ID##skin_val", &skinOverrideId))
-            IpcBridge_SetSkinOverride(overrideOn, skinOverrideId);
+            FeatureState::SetSkinOverride(overrideOn, skinOverrideId);
 
         bool on = overrideOn;
         if (ImGui::Checkbox("Override##skin", &on))
-            IpcBridge_SetSkinOverride(on, skinOverrideId);
+            FeatureState::SetSkinOverride(on, skinOverrideId);
 
         if (overrideOn) {
             // Keep the stored skin ID in sync with the editor while override is active.
-            if (skinOverrideId != IpcBridge_GetSkinOverrideId())
-                IpcBridge_SetSkinOverride(true, skinOverrideId);
+            if (skinOverrideId != FeatureState::GetSkinOverrideId())
+                FeatureState::SetSkinOverride(true, skinOverrideId);
 
             ImGui::SameLine();
             if (ImGui::Button("Apply now##skin"))
@@ -252,7 +252,7 @@ void Render()
                 bool selected = (g_skinSelected == i);
                 if (ImGui::Selectable(label, selected)) {
                     g_skinSelected = i;
-                    IpcBridge_SetSkinOverride(true, e->id);
+                    FeatureState::SetSkinOverride(true, e->id);
                 }
                 if (selected)
                     ImGui::SetItemDefaultFocus();
@@ -269,7 +269,7 @@ void Render()
             ImGui::SameLine();
             if (ImGui::SmallButton("Clear##browser")) {
                 g_skinSelected = -1;
-                IpcBridge_SetSkinOverride(false, 0);
+                FeatureState::SetSkinOverride(false, 0);
             }
         }
     }
