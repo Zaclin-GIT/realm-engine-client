@@ -25,6 +25,26 @@ float ChebDistance(Vec2 a, Vec2 b)
     return std::max(std::fabs(a.x - b.x), std::fabs(a.y - b.y));
 }
 
+float SanitizeNonNegative(float value, float fallback = 0.f)
+{
+    return std::isfinite(value) && value >= 0.f ? value : fallback;
+}
+
+int ThreatCount(const SensorSnapshot& sensors)
+{
+    return std::clamp(sensors.threatCount, 0, kMaxThreats);
+}
+
+int BlockerCount(const SensorSnapshot& sensors)
+{
+    return std::clamp(sensors.blockerCount, 0, kMaxBlockers);
+}
+
+int SampleCount(const Threat& threat)
+{
+    return std::clamp(threat.sampleCount, 0, kMaxPathSamples);
+}
+
 Vec2 ClosestPointOnSegment(Vec2 point, Vec2 a, Vec2 b)
 {
     const Vec2 ab = Sub(b, a);
@@ -37,7 +57,7 @@ Vec2 ClosestPointOnSegment(Vec2 point, Vec2 a, Vec2 b)
 bool ThreatHitsPoint(const Threat& threat, Vec2 point, const Settings& settings)
 {
     const float half = threat.radius + settings.playerRadius + settings.clearanceTiles;
-    const int n = std::min(threat.sampleCount, kMaxPathSamples);
+    const int n = SampleCount(threat);
     for (int i = 0; i < n; ++i) {
         if (ChebDistance(point, threat.samples[i]) <= half) return true;
         if (i + 1 < n) {
@@ -57,10 +77,10 @@ bool BlockerHitsPoint(const Blocker& blocker, Vec2 point, const Settings& settin
 float ThreatClearance(Vec2 point, const Settings& settings, const SensorSnapshot& sensors)
 {
     float best = 9999.f;
-    for (int i = 0; i < sensors.threatCount; ++i) {
+    for (int i = 0; i < ThreatCount(sensors); ++i) {
         const Threat& threat = sensors.threats[i];
-        const float half = threat.radius + settings.playerRadius;
-        const int n = std::min(threat.sampleCount, kMaxPathSamples);
+        const float half = threat.radius + settings.playerRadius + settings.clearanceTiles;
+        const int n = SampleCount(threat);
         for (int sample = 0; sample < n; ++sample) {
             best = std::min(best, ChebDistance(point, threat.samples[sample]) - half);
         }
@@ -82,11 +102,20 @@ void AppendCandidateDebug(PlanResult& out, Vec2 pos, bool safe, CandidateRejectR
 
 bool IsPointSafe(const Vec2& point, const Settings& settings, const SensorSnapshot& sensors)
 {
-    for (int i = 0; i < std::min(sensors.blockerCount, kMaxBlockers); ++i)
+    for (int i = 0; i < BlockerCount(sensors); ++i)
         if (BlockerHitsPoint(sensors.blockers[i], point, settings)) return false;
-    for (int i = 0; i < std::min(sensors.threatCount, kMaxThreats); ++i)
+    for (int i = 0; i < ThreatCount(sensors); ++i)
         if (ThreatHitsPoint(sensors.threats[i], point, settings)) return false;
     return true;
+}
+
+CandidateRejectReason RejectReasonForPoint(const Vec2& point, const Settings& settings, const SensorSnapshot& sensors)
+{
+    for (int i = 0; i < BlockerCount(sensors); ++i)
+        if (BlockerHitsPoint(sensors.blockers[i], point, settings)) return CandidateRejectReason::Blocker;
+    for (int i = 0; i < ThreatCount(sensors); ++i)
+        if (ThreatHitsPoint(sensors.threats[i], point, settings)) return CandidateRejectReason::Projectile;
+    return CandidateRejectReason::None;
 }
 
 bool IsSweepSafe(const Vec2& from, const Vec2& to, const Settings& settings, const SensorSnapshot& sensors)
@@ -103,7 +132,7 @@ bool IsSweepSafe(const Vec2& from, const Vec2& to, const Settings& settings, con
 Vec2 ComputeSlideDirection(const Vec2& desiredDir, const Vec2& player, const Settings& settings, const SensorSnapshot& sensors)
 {
     Vec2 adjusted = desiredDir;
-    for (int i = 0; i < std::min(sensors.blockerCount, kMaxBlockers); ++i) {
+    for (int i = 0; i < BlockerCount(sensors); ++i) {
         const Blocker& blocker = sensors.blockers[i];
         const Vec2 away = Normalize(Sub(player, blocker.pos));
         const float inward = Dot(adjusted, Mul(away, -1.f));
@@ -118,14 +147,18 @@ Vec2 ComputeSlideDirection(const Vec2& desiredDir, const Vec2& player, const Set
 PlanResult Evaluate(const PlanRequest& req)
 {
     PlanResult out{};
-    if (req.sensors.threatCount == 0 && req.sensors.blockerCount == 0) {
+    const int threatCount = ThreatCount(req.sensors);
+    const int blockerCount = BlockerCount(req.sensors);
+    const float maxMoveTiles = SanitizeNonNegative(req.settings.maxMoveTiles, Settings{}.maxMoveTiles);
+    const float moveBudget = std::clamp(SanitizeNonNegative(req.moveBudget), 0.f, maxMoveTiles);
+    if (threatCount == 0 && blockerCount == 0) {
         out.status = FrameStatus::NoThreats;
         return out;
     }
 
     const bool hasIntent = LenSq(req.intentDir) > 0.0001f;
     const Vec2 intentDir = Normalize(req.intentDir);
-    const Vec2 intended = Add(req.player, Mul(intentDir, hasIntent ? req.moveBudget : 0.f));
+    const Vec2 intended = Add(req.player, Mul(intentDir, hasIntent ? moveBudget : 0.f));
     if (IsSweepSafe(req.player, intended, req.settings, req.sensors)) {
         out.status = hasIntent ? FrameStatus::IntentSafe : FrameStatus::NoThreats;
         return out;
@@ -134,7 +167,7 @@ PlanResult Evaluate(const PlanRequest& req)
     const Vec2 slideDir = ComputeSlideDirection(intentDir, req.player, req.settings, req.sensors);
     out.slideDir = slideDir;
     if (hasIntent && LenSq(slideDir) > 0.0001f) {
-        const Vec2 slideTarget = Add(req.player, Mul(slideDir, req.moveBudget));
+        const Vec2 slideTarget = Add(req.player, Mul(slideDir, moveBudget));
         if (IsSweepSafe(req.player, slideTarget, req.settings, req.sensors)) {
             out.status = FrameStatus::SlideAssist;
             out.target = slideTarget;
@@ -149,14 +182,13 @@ PlanResult Evaluate(const PlanRequest& req)
     bool found = false;
     const float baseRadius = std::max(req.settings.playerRadius + req.settings.clearanceTiles, 0.15f);
     for (int ring = 0; ring < kRingPasses; ++ring) {
-        const float radius = std::min(req.settings.maxMoveTiles, baseRadius * (1.f + 0.55f * static_cast<float>(ring)));
+        const float radius = std::min(maxMoveTiles, baseRadius * (1.f + 0.55f * static_cast<float>(ring)));
         for (int i = 0; i < kCandidateDirections; ++i) {
             const float angle = kTwoPi * static_cast<float>(i) / static_cast<float>(kCandidateDirections);
             const Vec2 dir{ std::cos(angle), std::sin(angle) };
-            Vec2 candidate = Add(req.player, Mul(dir, std::min(radius, req.moveBudget)));
-            CandidateRejectReason reason = CandidateRejectReason::None;
-            bool safe = IsPointSafe(candidate, req.settings, req.sensors);
-            if (!safe) reason = CandidateRejectReason::Projectile;
+            Vec2 candidate = Add(req.player, Mul(dir, std::min(radius, moveBudget)));
+            CandidateRejectReason reason = RejectReasonForPoint(candidate, req.settings, req.sensors);
+            bool safe = reason == CandidateRejectReason::None;
             if (safe && !IsSweepSafe(req.player, candidate, req.settings, req.sensors)) {
                 safe = false;
                 reason = CandidateRejectReason::Sweep;
