@@ -11,6 +11,7 @@
     <ClCompile Include="src\bootstrap\version.cpp" />
     <ClCompile Include="src\platform\dx11\Dx11.cpp" />
     <ClCompile Include="src\core\ipc\IpcBridge.cpp" />
+    <ClCompile Include="src\core\ipc\IpcTileState.cpp" />
     <ClCompile Include="src\core\ipc\Handshake.cpp" />
     <ClCompile Include="src\ui\gui\tabs\CameraTAB.cpp" />
     <ClCompile Include="src\ui\gui\tabs\WorldTAB.cpp" />
@@ -83,6 +84,7 @@
     <ClInclude Include="src\bootstrap\version.h" />
     <ClInclude Include="src\platform\dx11\Dx11.h" />
     <ClInclude Include="src\core\ipc\IpcBridge.h" />
+    <ClInclude Include="src\core\ipc\IpcTileState.h" />
     <ClInclude Include="src\core\ipc\IpcBridgeIncludes.hpp" />
     <ClInclude Include="src\ui\IpcBridge.h" />
     <ClInclude Include="src\core\ipc\Handshake.h" />
