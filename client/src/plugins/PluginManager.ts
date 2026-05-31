@@ -10,6 +10,7 @@ import type { GameDataLoader } from '../game-data/GameDataLoader.js';
 import type { GameWorldState } from '../state/GameWorldState.js';
 import type { ProjectileTracker } from '../state/ProjectileTracker.js';
 import { Logger } from '../util/Logger.js';
+import { sendDllFeature } from '../bridge/DllFeatureBus.js';
 
 declare const __PLUGIN_BUNDLE_SIGNING_PUBLIC_KEY__: string | undefined;
 declare const __PLUGIN_BUNDLE_ENC_KEY__: string | undefined;
@@ -280,6 +281,7 @@ export class PluginManager {
       return { ok: false, reason: 'Admin access required for this plugin.' };
     }
     plugin.context.enabled = enabled;
+    sendDllFeature('showPluginFloatingText', `${plugin.name}: ${enabled ? 'Enabled' : 'Disabled'}`);
     return { ok: true };
   }
 
