@@ -2,11 +2,12 @@ import type { PluginContext } from '../src/plugins/PluginContext.js';
 import { sendDllFeature } from '../src/bridge/DllFeatureBus.js';
 
 // Maps the dashboard string value to the C++ TestTAB::DodgeMode enum.
-// Off=0, XDodge=1, Rollout=2.
+// Off=0, XDodge=1, Rollout=2, Zaclin=3.
 // XDodge uses A* (goal-directed) with BFS fallback (immediate escape),
 // ported from XRebuild/XDriver decompile. Rollout (RE-Sim) does per-input
-// forward simulation against a uniform-grid broad-phase.
-const DODGE_VALUES = ['off', 'xdodge', 'rollout'] as const;
+// forward simulation against a uniform-grid broad-phase. Zaclin is an
+// intent-preserving slide-assist dodge.
+const DODGE_VALUES = ['off', 'xdodge', 'rollout', 'zaclin'] as const;
 
 function modeToIdx(v: string): number {
   const i = DODGE_VALUES.indexOf(v as (typeof DODGE_VALUES)[number]);
@@ -30,6 +31,7 @@ export function register(ctx: PluginContext) {
       { label: 'Off', value: 'off' },
       { label: 'RE-Plus', value: 'xdodge' },
       { label: 'RE-Sim', value: 'rollout' },
+      { label: 'Zaclin', value: 'zaclin' },
     ],
   }, () => flush());
 
@@ -118,6 +120,32 @@ export function register(ctx: PluginContext) {
     label, advanced: true, type: 'select' as const, value: def,
     options: [{ label: 'On', value: 'on' }, { label: 'Off', value: 'off' }],
   });
+
+  // ── Zaclin settings ───────────────────────────────────────────────────────
+  ctx.registerSetting('zaclinReactWindowMs', {
+    label: '[Zaclin] React window (ms)',
+    type: 'range', value: 650, min: 100, max: 2500, step: 25,
+  }, (v: number) => sendDllFeature('zaclinReactWindowMs', v));
+  ctx.registerSetting('zaclinMaxMoveTiles', {
+    label: '[Zaclin] Max assist distance (tiles)',
+    type: 'range', value: 1.25, min: 0.2, max: 4.0, step: 0.05,
+  }, (v: number) => sendDllFeature('zaclinMaxMoveTiles', v));
+  ctx.registerSetting('zaclinPlayerRadius', {
+    label: '[Zaclin] Player radius', advanced: true,
+    type: 'range', value: 0.25, min: 0.05, max: 1.0, step: 0.01,
+  }, (v: number) => sendDllFeature('zaclinPlayerRadius', v));
+  ctx.registerSetting('zaclinProjectileRadiusFallback', {
+    label: '[Zaclin] Projectile fallback radius', advanced: true,
+    type: 'range', value: 0.10, min: 0.02, max: 1.0, step: 0.01,
+  }, (v: number) => sendDllFeature('zaclinProjectileRadiusFallback', v));
+  ctx.registerSetting('zaclinDamageThresholdPct', {
+    label: '[Zaclin] Damage threshold pct', advanced: true,
+    type: 'range', value: 0, min: 0, max: 1, step: 0.01,
+  }, (v: number) => sendDllFeature('zaclinDamageThresholdPct', v));
+  ctx.registerSetting('zaclinDebugOverlay', onOff('[Zaclin] Debug overlay', 'off'),
+    (v: string) => sendDllFeature('zaclinDebugOverlay', v === 'on' ? 1 : 0));
+  ctx.registerSetting('zaclinCandidateOverlay', onOff('[Zaclin] Candidate points', 'on'),
+    (v: string) => sendDllFeature('zaclinCandidateOverlay', v === 'on' ? 1 : 0));
 
   ctx.registerSetting('xdodgeAstar', onOff('[Goal] Smart goal pathing'),
     (v: string) => sendDllFeature('xdodgeAstar', v === 'on' ? 1 : 0));
@@ -256,6 +284,14 @@ export function register(ctx: PluginContext) {
     sendDllFeature('rolloutIntentWeight',  ctx.getSetting<number>('rolloutIntentWeight'));
     sendDllFeature('rolloutRebuildN',      ctx.getSetting<number>('rolloutRebuildN'));
     for (const k of ['rolloutAvoidEnemies', 'rolloutWasdYield', 'rolloutCommitDwell', 'rolloutForceBrute', 'rolloutDrawPath'])
+      sendDllFeature(k, ctx.getSetting<string>(k) === 'on' ? 1 : 0);
+    // Zaclin settings.
+    sendDllFeature('zaclinReactWindowMs', ctx.getSetting<number>('zaclinReactWindowMs'));
+    sendDllFeature('zaclinMaxMoveTiles', ctx.getSetting<number>('zaclinMaxMoveTiles'));
+    sendDllFeature('zaclinPlayerRadius', ctx.getSetting<number>('zaclinPlayerRadius'));
+    sendDllFeature('zaclinProjectileRadiusFallback', ctx.getSetting<number>('zaclinProjectileRadiusFallback'));
+    sendDllFeature('zaclinDamageThresholdPct', ctx.getSetting<number>('zaclinDamageThresholdPct'));
+    for (const k of ['zaclinDebugOverlay', 'zaclinCandidateOverlay'])
       sendDllFeature(k, ctx.getSetting<string>(k) === 'on' ? 1 : 0);
     // Re-apply the 60fps cap here too. The onEnabledChange / clientConnected
     // handlers were the only places setting targetFrameRate, so if the cap
