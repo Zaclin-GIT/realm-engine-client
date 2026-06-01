@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <mutex>
 
 namespace ZaclinDodge {
 namespace {
@@ -25,6 +26,7 @@ std::atomic<float> g_projectileRadiusFallback{ 0.10f };
 std::atomic<float> g_damageThresholdPct{ 0.f };
 std::atomic<bool> g_debugOverlay{ false };
 std::atomic<bool> g_candidateOverlay{ true };
+std::mutex g_debugMutex;
 DebugSnapshot g_debug{};
 
 float Clamp(float value, float lo, float hi)
@@ -53,17 +55,55 @@ float MoveBudget(float tilesPerSec, float dt, float maxMoveTiles)
     return std::min(maxMoveTiles, std::max(0.02f, tilesPerSec * dt));
 }
 
+void PublishDebug(const DebugSnapshot& snapshot)
+{
+    std::lock_guard<std::mutex> lock(g_debugMutex);
+    g_debug = snapshot;
+}
+
+DebugSnapshot ReadDebugSnapshot()
+{
+    std::lock_guard<std::mutex> lock(g_debugMutex);
+    return g_debug;
+}
+
+void PublishStatus(FrameStatus status)
+{
+    DebugSnapshot snapshot = ReadDebugSnapshot();
+    snapshot.status = status;
+    snapshot.hasSelectedTarget = false;
+    snapshot.candidateCount = 0;
+    PublishDebug(snapshot);
+}
+
+void ApplyDamageThreshold(SensorSnapshot& sensors, int32_t maxHp, float damageThresholdPct)
+{
+    if (maxHp <= 0 || damageThresholdPct <= 0.f) return;
+    const float minDamage = static_cast<float>(maxHp) * damageThresholdPct;
+    int kept = 0;
+    for (int i = 0; i < std::min(sensors.threatCount, kMaxThreats); ++i) {
+        if (sensors.threats[i].damage < minDamage) continue;
+        if (kept != i) sensors.threats[kept] = sensors.threats[i];
+        ++kept;
+    }
+    sensors.threatCount = kept;
+}
+
 } // namespace
 
-void SetEnabled(bool enabled) { g_enabled.store(enabled, std::memory_order_relaxed); }
+void SetEnabled(bool enabled)
+{
+    g_enabled.store(enabled, std::memory_order_relaxed);
+    if (!enabled) PublishDebug(DebugSnapshot{});
+}
 bool IsEnabled() { return g_enabled.load(std::memory_order_relaxed); }
-void OnEnter() { g_debug = DebugSnapshot{}; }
+void OnEnter() { PublishDebug(DebugSnapshot{}); }
 
 void Tick(void* player, float px, float py, float dt)
 {
     if (!IsEnabled()) return;
-    if (!player) { g_debug.status = FrameStatus::NoPlayer; return; }
-    if (!DodgeRuntime::EnsureResolved()) { g_debug.status = FrameStatus::MovementFailed; return; }
+    if (!player || !std::isfinite(px) || !std::isfinite(py)) { PublishStatus(FrameStatus::NoPlayer); return; }
+    if (!DodgeRuntime::EnsureResolved()) { PublishStatus(FrameStatus::MovementFailed); return; }
 
     SteerInput::Tick();
     const SteerInput::SteerState steer = SteerInput::Get();
@@ -82,24 +122,27 @@ void Tick(void* player, float px, float py, float dt)
     req.intentDir = steer.active ? Vec2{ steer.dirX, steer.dirY } : Vec2{};
     req.moveBudget = moveBudget;
     req.sensors = Sensors::Build(px, py, settings);
+    ApplyDamageThreshold(req.sensors, maxHp, settings.damageThresholdPct);
 
     const PlanResult plan = Planner::Evaluate(req);
 
-    g_debug.status = plan.status;
-    g_debug.player = req.player;
-    g_debug.intentDir = req.intentDir;
-    g_debug.intendedTarget = { px + req.intentDir.x * moveBudget, py + req.intentDir.y * moveBudget };
-    g_debug.slideDir = plan.slideDir;
-    g_debug.selectedTarget = plan.target;
-    g_debug.hasSelectedTarget = plan.shouldMove;
-    g_debug.sensors = req.sensors;
-    g_debug.candidateCount = std::min(plan.candidateCount, kMaxCandidates);
-    for (int i = 0; i < g_debug.candidateCount; ++i) g_debug.candidates[i] = plan.candidates[i];
+    DebugSnapshot debug{};
+    debug.status = plan.status;
+    debug.player = req.player;
+    debug.intentDir = req.intentDir;
+    debug.intendedTarget = { px + req.intentDir.x * moveBudget, py + req.intentDir.y * moveBudget };
+    debug.slideDir = plan.slideDir;
+    debug.selectedTarget = plan.target;
+    debug.hasSelectedTarget = plan.shouldMove;
+    debug.sensors = req.sensors;
+    debug.candidateCount = std::min(plan.candidateCount, kMaxCandidates);
+    for (int i = 0; i < debug.candidateCount; ++i) debug.candidates[i] = plan.candidates[i];
 
     if (plan.shouldMove) {
         if (!DodgeRuntime::CallMoveTo(player, plan.target.x, plan.target.y))
-            g_debug.status = FrameStatus::MovementFailed;
+            debug.status = FrameStatus::MovementFailed;
     }
+    PublishDebug(debug);
 }
 
 void RenderSettings()
@@ -123,7 +166,8 @@ void RenderSettings()
 void RenderDebugOverlay(float camX, float camY, float angle, float zoom, float cx, float cy)
 {
     if (!GetDebugOverlay()) return;
-    Debug::Render(g_debug, ReadSettings(), camX, camY, angle, zoom, cx, cy);
+    const DebugSnapshot snapshot = ReadDebugSnapshot();
+    Debug::Render(snapshot, ReadSettings(), camX, camY, angle, zoom, cx, cy);
 }
 
 void SetReactWindowMs(float ms) { g_reactWindowMs.store(Clamp(ms, 100.f, 2500.f), std::memory_order_relaxed); }
