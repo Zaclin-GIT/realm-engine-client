@@ -20,6 +20,28 @@ constexpr float kObstacleRadius = 0.5f;
 constexpr int kObstacleGridRadius = 6;
 constexpr float kObstacleStep = 1.f;
 
+bool IsFinite(float v)
+{
+    return std::isfinite(v);
+}
+
+bool IsFinitePoint(float x, float y)
+{
+    return IsFinite(x) && IsFinite(y);
+}
+
+float SafeRadius(float value, float fallback)
+{
+    if (!IsFinite(value) || value <= 0.f) return fallback;
+    return std::clamp(value, 0.02f, 5.f);
+}
+
+float SafeReactWindowMs(float value)
+{
+    if (!IsFinite(value) || value <= 0.f) return Settings{}.reactWindowMs;
+    return std::clamp(value, 100.f, 2500.f);
+}
+
 float DistSq(float ax, float ay, float bx, float by)
 {
     const float dx = ax - bx;
@@ -29,6 +51,7 @@ float DistSq(float ax, float ay, float bx, float by)
 
 void AddBlocker(SensorSnapshot& out, Blocker::Kind kind, int32_t id, float x, float y, float radius)
 {
+    if (!IsFinitePoint(x, y)) return;
     if (out.blockerCount >= kMaxBlockers) {
         out.blockerLimited = true;
         return;
@@ -37,17 +60,35 @@ void AddBlocker(SensorSnapshot& out, Blocker::Kind kind, int32_t id, float x, fl
     b.kind = kind;
     b.id = id;
     b.pos = { x, y };
-    b.radius = radius;
+    b.radius = SafeRadius(radius, kObstacleRadius);
 }
 
 struct EnemyCtx {
     SensorSnapshot* out;
+    float playerX;
+    float playerY;
+    float cullSq;
 };
 
 void OnEnemy(float x, float y, int32_t id, void* user)
 {
     auto* ctx = static_cast<EnemyCtx*>(user);
+    if (!ctx || !ctx->out || !IsFinitePoint(x, y)) return;
+    if (DistSq(x, y, ctx->playerX, ctx->playerY) > ctx->cullSq) return;
     AddBlocker(*ctx->out, Blocker::Kind::Enemy, id, x, y, kEnemyRadius);
+}
+
+bool TryPredictProjectile(const WorldProjectile& projectile, float tMs, float& outX, float& outY)
+{
+    outX = 0.f;
+    outY = 0.f;
+    __try {
+        ProjectileTracking::ComputePosAt(projectile, tMs, outX, outY);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    return IsFinitePoint(outX, outY);
 }
 
 } // namespace
@@ -59,39 +100,42 @@ SensorSnapshot Build(float playerX, float playerY, const Settings& settings)
     std::vector<WorldProjectile> projectiles;
     ProjectileTracking::CopyActiveForDraw(projectiles);
     const float cullSq = kThreatCullTiles * kThreatCullTiles;
+    const float fallbackRadius = SafeRadius(settings.projectileRadiusFallback, Settings{}.projectileRadiusFallback);
+    const float reactWindowMs = SafeReactWindowMs(settings.reactWindowMs);
     const uint64_t nowMs = GetTickCount64();
     for (const WorldProjectile& p : projectiles) {
         if (!p.valid) continue;
+        if (!IsFinitePoint(p.x, p.y)) continue;
+        if (DistSq(p.x, p.y, playerX, playerY) > cullSq) continue;
         if (out.threatCount >= kMaxThreats) {
             out.projectileLimited = true;
             break;
         }
-        if (DistSq(p.x, p.y, playerX, playerY) > cullSq) continue;
 
         Threat& threat = out.threats[out.threatCount];
         threat.id = static_cast<int32_t>(out.threatCount + 1);
-        threat.radius = settings.projectileRadiusFallback;
+        threat.radius = fallbackRadius;
         float readRadius = 0.f;
         if (ProjectileTracking::TryReadProjRadiusFromInstance(p.ptr, readRadius) && readRadius > 0.f && readRadius < 5.f)
-            threat.radius = readRadius;
+            threat.radius = SafeRadius(readRadius, fallbackRadius);
         threat.damage = static_cast<float>(std::max(p.damage, 0));
 
         const float elapsed = static_cast<float>(nowMs > p.spawnTick ? nowMs - p.spawnTick : 0u);
-        const float stepMs = std::max(16.f, settings.reactWindowMs / static_cast<float>(kMaxPathSamples - 1));
+        const float stepMs = std::max(16.f, reactWindowMs / static_cast<float>(kMaxPathSamples - 1));
         for (int i = 0; i < kMaxPathSamples; ++i) {
             const float tMs = elapsed + stepMs * static_cast<float>(i);
             if (p.lifetime > 0.f && tMs > p.lifetime) break;
             float x = p.x;
             float y = p.y;
-            if (i != 0) ProjectileTracking::ComputePosAtSafe(p, tMs, x, y);
-            if (!std::isfinite(x) || !std::isfinite(y)) break;
+            if (i != 0 && !TryPredictProjectile(p, tMs, x, y)) break;
+            if (!IsFinitePoint(x, y)) break;
             threat.samples[threat.sampleCount++] = { x, y };
-            if (stepMs * static_cast<float>(i) >= settings.reactWindowMs) break;
+            if (stepMs * static_cast<float>(i) >= reactWindowMs) break;
         }
         if (threat.sampleCount > 0) ++out.threatCount;
     }
 
-    EnemyCtx enemyCtx{ &out };
+    EnemyCtx enemyCtx{ &out, playerX, playerY, cullSq };
     AutoAim::EnumerateLiveEnemies(OnEnemy, &enemyCtx);
 
     for (int gy = -kObstacleGridRadius; gy <= kObstacleGridRadius; ++gy) {
