@@ -21,6 +21,7 @@
 #include "DangerPlanner.h"
 #include "XDodge.h"
 #include "RolloutDodge.h"
+#include "ZaclinDodge.h"
 #include "SpeedHack.h"
 #include <string>
 #include <cctype>
@@ -173,6 +174,20 @@ namespace {
         return ApplyFeatureTable(f, h, sizeof(h) / sizeof(h[0]));
     }
 
+    bool ApplyZaclinFeature(const FeatureCommand& f)
+    {
+        static const FeatureHandler h[] = {
+            FH_FLOAT("zaclinReactWindowMs", ZaclinDodge::SetReactWindowMs),
+            FH_FLOAT("zaclinMaxMoveTiles", ZaclinDodge::SetMaxMoveTiles),
+            FH_FLOAT("zaclinPlayerRadius", ZaclinDodge::SetPlayerRadius),
+            FH_FLOAT("zaclinProjectileRadiusFallback", ZaclinDodge::SetProjectileRadiusFallback),
+            FH_FLOAT("zaclinDamageThresholdPct", ZaclinDodge::SetDamageThresholdPct),
+            FH_INT_BOOL("zaclinDebugOverlay", ZaclinDodge::SetDebugOverlay),
+            FH_INT_BOOL("zaclinCandidateOverlay", ZaclinDodge::SetCandidateOverlay)
+        };
+        return ApplyFeatureTable(f, h, sizeof(h) / sizeof(h[0]));
+    }
+
     bool ApplyInputCameraSkinFeature(const FeatureCommand& f)
     {
         static const FeatureHandler h[] = {
@@ -229,6 +244,7 @@ namespace FeatureCommandRegistry {
     {
         if (ApplyCoreFeature(feature)) return true;
         if (ApplyXDodgeFeature(feature)) return true;
+        if (ApplyZaclinFeature(feature)) return true;
         if (ApplyRolloutFeature(feature)) return true;
         if (ApplyInputCameraSkinFeature(feature)) return true;
         ApplyDangerPlannerFeature(feature);

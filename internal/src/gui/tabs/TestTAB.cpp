@@ -4,6 +4,7 @@
 #include "ProjectileCatalog.h"
 #include "XDodge.h"
 #include "RolloutDodge.h"
+#include "ZaclinDodge.h"
 #include <windows.h>
 
 using TestTAB::DodgeMode;
@@ -127,6 +128,7 @@ void ApplyDodgeModeWithEnter(DodgeMode nextMode)
     // enabled at a time (mutual exclusivity enforced here).
     XDodge::SetEnabled(nextMode == DodgeMode::XDodge);
     RolloutDodge::SetEnabled(nextMode == DodgeMode::Rollout);
+    ZaclinDodge::SetEnabled(nextMode == DodgeMode::Zaclin);
     if (nextMode == DodgeMode::XDodge) {
         XDodge::OnEnter();
         // Install the AppEngineManager::Update detour that drives the dodge Tick.
@@ -139,6 +141,9 @@ void ApplyDodgeModeWithEnter(DodgeMode nextMode)
         DangerPlanner::TryInstall();
     } else if (nextMode == DodgeMode::Rollout) {
         RolloutDodge::OnEnter();
+        DangerPlanner::TryInstall();
+    } else if (nextMode == DodgeMode::Zaclin) {
+        ZaclinDodge::OnEnter();
         DangerPlanner::TryInstall();
     }
 
@@ -648,6 +653,7 @@ void TestTAB::Tick(bool menuVisible)
         if (g_w2sValid) {
             XDodge::RenderDebugPath(camX, camY, angleRad, zoom, cx, cy);
             RolloutDodge::RenderDebugPath(camX, camY, angleRad, zoom, cx, cy);
+            ZaclinDodge::RenderDebugOverlay(camX, camY, angleRad, zoom, cx, cy);
         }
 
         // Locked enemy visualization — red reticle + two rings:
@@ -948,7 +954,7 @@ void TestTAB::RenderMovementSection()
     ImGui::Indent(8.f);
 
     int modeIdx = static_cast<int>(g_dodgeMode);
-    const char* modeLabels[] = { "Off", "RE-Plus", "RE-Sim" };
+    const char* modeLabels[] = { "Off", "RE-Plus", "RE-Sim", "Zaclin" };
     ImGui::SetNextItemWidth(240.f);
     if (ImGui::Combo("Mode##dodgeModeCombo", &modeIdx, modeLabels, IM_ARRAYSIZE(modeLabels))) {
         ApplyDodgeModeWithEnter(static_cast<DodgeMode>(modeIdx));
@@ -963,6 +969,9 @@ void TestTAB::RenderMovementSection()
     } else if (g_dodgeMode == DodgeMode::Rollout) {
         ImGui::Spacing();
         RolloutDodge::RenderSettings();
+    } else if (g_dodgeMode == DodgeMode::Zaclin) {
+        ImGui::Spacing();
+        ZaclinDodge::RenderSettings();
     }
 
     ImGui::Unindent(8.f);
@@ -1294,9 +1303,11 @@ namespace TestTAB {
     void      SetDodgeMode(DodgeMode m)
     {
         const int v = static_cast<int>(m);
-        g_dodgeMode = (v >= 0 && v <= static_cast<int>(DodgeMode::XDodge))
+        g_dodgeMode = (v >= 0 && v <= static_cast<int>(DodgeMode::Zaclin))
             ? m : DodgeMode::Off;
         XDodge::SetEnabled(g_dodgeMode == DodgeMode::XDodge);
+        RolloutDodge::SetEnabled(g_dodgeMode == DodgeMode::Rollout);
+        ZaclinDodge::SetEnabled(g_dodgeMode == DodgeMode::Zaclin);
         DangerPlanner::SetEnabled(false);
     }
     // SetDodgeModeWithEnter — IpcBridge calls this to route a dashboard dodge-mode

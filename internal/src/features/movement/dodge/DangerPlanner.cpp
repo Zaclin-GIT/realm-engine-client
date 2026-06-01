@@ -3,6 +3,7 @@
 #include "DodgeGeometry.h"
 #include "XDodge.h"
 #include "RolloutDodge.h"
+#include "ZaclinDodge.h"
 #include "DbgFileLog.h"
 #include "SteerInput.h"
 #include "GhostHit.h"
@@ -698,7 +699,8 @@ void __fastcall Detour_AppEngineUpdate(void* __this, void* method)
     // share the preamble, goal plumbing, and GhostHit safety net below.
     const bool xdodgeOn  = XDodge::IsEnabled();
     const bool rolloutOn = RolloutDodge::IsEnabled();
-    if (xdodgeOn || rolloutOn) {
+    const bool zaclinOn = ZaclinDodge::IsEnabled();
+    if (xdodgeOn || rolloutOn || zaclinOn) {
         // Use GameState::GetLocalPtr() directly — the EXACT source AutoAim
         // uses (and AutoAim works). LocalPlayer::GetPtr() is a second-hand
         // mirror refreshed only by LocalPlayer::Tick() on the render thread
@@ -725,8 +727,9 @@ void __fastcall Detour_AppEngineUpdate(void* __this, void* method)
         // shared external goal that both engines consume.
         SteerInput::Tick();
         ResolveEnemyLock(px, py);
-        if (rolloutOn) RolloutDodge::Tick(p, px, py, dt);
-        else           XDodge::Tick(p, px, py, dt);
+        if (zaclinOn)       ZaclinDodge::Tick(p, px, py, dt);
+        else if (rolloutOn) RolloutDodge::Tick(p, px, py, dt);
+        else                XDodge::Tick(p, px, py, dt);
         // GhostHit runs independently — a SAFETY net for bullets the game's
         // own per-tick collision skipped. Cheap when off (one atomic load).
         GhostHit::Tick(p, px, py);
