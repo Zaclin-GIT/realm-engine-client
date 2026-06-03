@@ -1086,7 +1086,7 @@ export class DevServer {
     name: string;
     createdAt: number;
     updatedAt: number;
-    plugins: Array<{ id: string; enabled: boolean; settings: Record<string, unknown> }>;
+    plugins: Array<{ id: string; enabled: boolean; hotkey: string; settings: Record<string, unknown> }>;
   } {
     const now = Date.now();
     const plugins = this.pluginManager.getPlugins().map((p) => {
@@ -1096,7 +1096,7 @@ export class DevServer {
         if (s.type === 'button') continue;
         settings[s.key] = s.value;
       }
-      return { id: p.id, enabled: !!p.enabled, settings };
+      return { id: p.id, enabled: !!p.enabled, hotkey: String((p as any).hotkey || ''), settings };
     });
     return {
       id: this.sanitizeConfigId(name),
@@ -1162,6 +1162,12 @@ export class DevServer {
       if (typeof p.enabled === 'boolean') {
         this.pluginManager.togglePlugin(p.id, p.enabled);
       }
+      if (typeof p.hotkey === 'string') {
+        const result = this.pluginManager.updatePluginHotkey(p.id, p.hotkey);
+        if (!result.ok) {
+          Logger.warn('DevServer', `Skipped hotkey for ${p.id}: ${result.reason || 'invalid hotkey'}`);
+        }
+      }
       if (p.settings && typeof p.settings === 'object') {
         for (const [key, value] of Object.entries(p.settings as Record<string, unknown>)) {
           // Never execute button settings from a config replay.
@@ -1172,6 +1178,7 @@ export class DevServer {
       }
     }
     this.broadcastPluginState();
+    this.syncPluginHotkeysToDll();
     return { ok: true, message: `Loaded config "${String(snapshot.name || snapshot.id || 'config')}".` };
   }
 
@@ -1376,7 +1383,10 @@ export class DevServer {
   /** Stash the named-pipe bridge so other dashboard subsystems can talk to the injected DLL. */
   setInternalBridge(bridge: InternalBridge): void {
     this.internalBridge = bridge;
-    bridge.on('authenticated', () => this.broadcastInternalState());
+    bridge.on('authenticated', () => {
+      this.broadcastInternalState();
+      this.syncPluginHotkeysToDll();
+    });
     bridge.on('disconnected',  () => this.broadcastInternalState());
     bridge.on('unresolvedClasses', (list: string[]) => {
       this.lastUnresolvedClasses = list;
@@ -4625,6 +4635,19 @@ export class DevServer {
           }
           this.broadcastPluginState();
           this.scheduleAutosave();
+        } else if (msg.type === 'updatePluginHotkey') {
+          const result = this.pluginManager.updatePluginHotkey(msg.pluginId, msg.hotkey);
+          if (!result.ok && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'pluginHotkeyUpdateError',
+              pluginId: msg.pluginId,
+              reason: result.reason,
+              conflictPluginId: result.conflictPluginId ?? null,
+            }));
+          }
+          this.broadcastPluginState();
+          this.syncPluginHotkeysToDll();
+          this.scheduleAutosave();
         } else if (msg.type === 'resetPluginSettings') {
           const changed = this.pluginManager.resetPluginSettings(String(msg.pluginId ?? ''));
           if (ws.readyState === WebSocket.OPEN) {
@@ -5174,10 +5197,23 @@ export class DevServer {
     }
   }
 
+  private syncPluginHotkeysToDll(): void {
+    try {
+      const bindings = this.pluginManager.getPluginHotkeyBindings();
+      const payload = bindings
+        .map((b) => `${b.pluginId}=${b.hotkey}`)
+        .join(';');
+      this.internalBridge?.setFeature('pluginToggleHotkeys', payload);
+    } catch (err) {
+      Logger.warn('DevServer', `plugin hotkey sync failed: ${(err as Error).message}`);
+    }
+  }
+
   broadcastDllMessage(msg: any): void {
     if (msg?.type === 'hotkeyEvent') {
       if (this.applyInternalHotkeyEvent(msg)) {
         this.broadcastPluginState();
+        this.syncPluginHotkeysToDll();
         this.scheduleAutosave();
       }
     }
@@ -5193,6 +5229,17 @@ export class DevServer {
     }
     if (pluginId === 'player-noclip' && action === 'noclipEnabled') {
       return this.pluginManager.updateSetting('player-noclip', 'noclipEnabled', value);
+    }
+    if (action === 'togglePlugin') {
+      const result = this.pluginManager.togglePluginByHotkey(pluginId);
+      if (result.ok) {
+        this.eventTracker?.track('plugin_toggle', {
+          plugin: pluginId,
+          enabled: !!result.enabled,
+          source: 'hotkey',
+        });
+      }
+      return result.ok;
     }
     if (pluginId === 'ghostHit') {
       this.handleGhostHitEvent(action);

@@ -12,7 +12,7 @@
 struct FeatureCommand {
     char key[64] = {};
     char valueType[8] = {};
-    char value[128] = {};
+    char value[4096] = {};  // large enough for multi-plugin hotkey specs (id=combo;...)
 
     bool Is(const char* name) const;
     bool Bool() const;

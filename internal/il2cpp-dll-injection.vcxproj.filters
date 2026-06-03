@@ -26,6 +26,7 @@
     <ClCompile Include="src\features\movement\dodge\DangerPlanner.cpp" />
     <ClCompile Include="src\features\movement\dodge\RolloutDodge.cpp" />
     <ClCompile Include="src\features\movement\dodge\GridThreatIndex.cpp" />
+    <ClCompile Include="src\features\movement\dodge\QuadtreeThreatIndex.cpp" />
     <ClCompile Include="src\features\movement\dodge\MovementRuntime.cpp" />
     <ClCompile Include="src\features\movement\dodge\ProjectileCatalog.cpp" />
     <ClCompile Include="src\features\movement\dodge\SteerInput.cpp" />
@@ -136,6 +137,7 @@
     <ClInclude Include="src\features\movement\dodge\RolloutDodge.h" />
     <ClInclude Include="src\features\movement\dodge\ThreatIndex.h" />
     <ClInclude Include="src\features\movement\dodge\GridThreatIndex.h" />
+    <ClInclude Include="src\features\movement\dodge\QuadtreeThreatIndex.h" />
     <ClInclude Include="src\features\movement\dodge\DodgeHit.h" />
     <ClInclude Include="src\features\movement\dodge\DodgeSpeed.h" />
     <ClInclude Include="src\features\movement\dodge\DodgeGeometry.h" />

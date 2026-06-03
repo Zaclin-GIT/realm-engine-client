@@ -847,7 +847,8 @@ export function register(ctx: PluginContext) {
     let existingQuantity = 0;
     let firstEmptySlot = -1;
 
-    for (let slot = 0; slot < QUICK_SLOT_COUNT; slot++) {
+    const quickSlotCount = client.playerData.hasThirdQuickSlot ? 3 : 2;
+    for (let slot = 0; slot < quickSlotCount; slot++) {
       const current = readQuickSlot(client, slot);
 
       if (current.itemType === itemId) {
@@ -918,7 +919,9 @@ export function register(ctx: PluginContext) {
 
     const tryBackpack = (): LootDestination | null => {
       if (!allowBackpack || !client.playerData.hasBackpack) return null;
-      for (let slot = 0; slot < 16; slot++) {
+      // backpackTier 8 = 8 slots (no extender), 16 = 16 slots (with extender)
+      const backpackSize = client.playerData.hasBackpackExtender ? 16 : 8;
+      for (let slot = 0; slot < backpackSize; slot++) {
         const packetSlotId = 12 + slot;
         const objectType = Number(client.playerData.backpack[slot] ?? -1);
         if (objectType !== -1) continue;
@@ -1255,10 +1258,51 @@ export function register(ctx: PluginContext) {
     return null;
   }
 
+  // ─── Diagnostic logging ───────────────────────────────────────────────────────
+
+  let diagEnabled = false;
+  let _diagLastPeriodicMs = 0;
+
+  function diagLog(msg: string): void {
+    if (diagEnabled) ctx.log(`[DIAG] ${msg}`);
+  }
+
+  function diagInventorySnapshot(client: ClientConnection): string {
+    const inv = client.playerData.inventory ?? [];
+    const bp  = client.playerData.backpack  ?? [];
+    const qs  = (client.playerData as any).quickSlots ?? [];
+    const freeInv = [4,5,6,7,8,9,10,11].filter((s) => Number(inv[s] ?? -1) === -1).length;
+    const bpSize  = client.playerData.hasBackpack ? (client.playerData.hasBackpackExtender ? 16 : 8) : 0;
+    const freeBp  = bpSize > 0
+      ? Array.from({ length: bpSize }, (_, i) => Number(bp[i] ?? -1)).filter((v) => v === -1).length
+      : -1;
+    const qsCount = client.playerData.hasThirdQuickSlot ? 3 : 2;
+    const qsParts = Array.from({ length: qsCount }, (_, i) => {
+      const s: any = qs[i];
+      if (s && typeof s === 'object') return `qs${i}=${s.itemType}x${s.quantity}`;
+      return `qs${i}=${typeof s === 'number' ? s : -1}`;
+    });
+    return `inv_free=${freeInv} bp_free=${freeBp === -1 ? 'n/a' : freeBp}(size=${bpSize}) qs_count=${qsCount} ${qsParts.join(' ')}`;
+  }
+
+  ctx.registerSetting('diagEnabled', {
+    label: 'Diagnostic Logging', advanced: true,
+    type: 'boolean',
+    value: false,
+  }, (value: boolean) => {
+    diagEnabled = value === true;
+    ctx.log(`Auto Loot diagnostic logging: ${diagEnabled ? 'ON' : 'OFF'}`);
+  });
+
   function tryAutoLoot(client: ClientConnection): void {
     if (!ctx.enabled || !ctx.worldState) return;
     if (!client?.connected || !client.objectId) return;
-    if (shouldSkipMap(client.playerData.mapName || '')) return;
+
+    const mapName = client.playerData.mapName || '';
+    if (shouldSkipMap(mapName)) {
+      diagLog(`tryAutoLoot skip — map="${mapName}"`);
+      return;
+    }
 
     const playerPos = client.playerData.pos;
     if (!playerPos || !Number.isFinite(playerPos.x) || !Number.isFinite(playerPos.y)) return;
@@ -1269,13 +1313,18 @@ export function register(ctx: PluginContext) {
     notifyNewBags(client, state);
     updateIdleState(client, state);
 
-    if (disableWhenIdle && state.stationaryTicks > STATIONARY_TICK_LIMIT) return;
+    if (disableWhenIdle && state.stationaryTicks > STATIONARY_TICK_LIMIT) {
+      diagLog(`tryAutoLoot skip — idle (ticks=${state.stationaryTicks})`);
+      return;
+    }
 
     if (state.pendingDestSlotId != null) {
       if (isQuickslotPacketSlot(state.pendingDestSlotId) && state.pendingDestQuantity != null) {
         const quickslotIndex = state.pendingDestSlotId - QUICKSLOT_PACKET_BASE;
         const current = readQuickSlot(client, quickslotIndex);
-        if (current.quantity >= state.pendingDestQuantity || (now - state.pendingSince) >= PENDING_DEST_TIMEOUT_MS) {
+        const timedOut = (now - state.pendingSince) >= PENDING_DEST_TIMEOUT_MS;
+        diagLog(`pending qs slot=${state.pendingDestSlotId} curQty=${current.quantity} wantQty=${state.pendingDestQuantity} timedOut=${timedOut}`);
+        if (current.quantity >= state.pendingDestQuantity || timedOut) {
           state.pendingDestSlotId = null;
           state.pendingDestQuantity = null;
           state.pendingPotionItemId = null;
@@ -1283,7 +1332,9 @@ export function register(ctx: PluginContext) {
         }
       } else {
         const current = getPlayerSlotObjectType(client, state.pendingDestSlotId);
-        if (current !== -1 || (now - state.pendingSince) >= PENDING_DEST_TIMEOUT_MS) {
+        const timedOut = (now - state.pendingSince) >= PENDING_DEST_TIMEOUT_MS;
+        diagLog(`pending inv slot=${state.pendingDestSlotId} curType=${current} timedOut=${timedOut}`);
+        if (current !== -1 || timedOut) {
           state.pendingDestSlotId = null;
           state.pendingDestQuantity = null;
           state.pendingPotionItemId = null;
@@ -1291,7 +1342,10 @@ export function register(ctx: PluginContext) {
         }
       }
     }
-    if (state.pendingDestSlotId != null) return;
+    if (state.pendingDestSlotId != null) {
+      diagLog(`tryAutoLoot skip — pendingDestSlot=${state.pendingDestSlotId}`);
+      return;
+    }
     if ((now - state.lastPickupAt) < PICKUP_INTERVAL_MS) return;
 
     for (const [key, attemptedAt] of state.recentAttempts.entries()) {
@@ -1308,6 +1362,7 @@ export function register(ctx: PluginContext) {
         const lastAttempt = Number(state.recentAttempts.get(attemptKey) || 0);
         if ((now - lastAttempt) >= RETRY_ITEM_AFTER_MS) {
           const expectedQuantity = getExpectedQuickslotQuantity(client, restock.destination, restock.itemId);
+          diagLog(`SEND restock INVENTORYSWAP item=${restock.itemId} from=${restock.fromPacketSlotId} to=${restock.destination.packetSlotId}`);
           sendPlayerSwap(client, restock.fromPacketSlotId, restock.itemId, restock.destination);
           state.lastPickupAt = now;
           state.pendingDestSlotId = restock.destination.packetSlotId;
@@ -1323,30 +1378,61 @@ export function register(ctx: PluginContext) {
     const generalDestination = getFirstFreeLootDestination(client, useBackpack, preferBackpack, state, now);
 
     const bags = getNearbyBags(client, state);
+
+    // Periodic diagnostic: log current state whenever bags are nearby
+    if (diagEnabled && bags.length > 0 && (now - _diagLastPeriodicMs) >= 2000) {
+      _diagLastPeriodicMs = now;
+      const invSnap = diagInventorySnapshot(client);
+      const bagSummary = bags.map((b) => {
+        const dist = Math.hypot(Number(b.pos?.x || 0) - playerPos.x, Number(b.pos?.y || 0) - playerPos.y);
+        const items: string[] = [];
+        for (let s = 0; s < 8; s++) {
+          const id = getBagItemId(b, s);
+          if (id > 0) items.push(`${id}(${getItemDisplayName(id)})`);
+        }
+        return `bag#${b.objectId}(type=${b.objectType},dist=${dist.toFixed(2)})=[${items.join(',')}]`;
+      }).join(' ');
+      ctx.log(`[DIAG] map="${mapName}" pos=(${playerPos.x.toFixed(1)},${playerPos.y.toFixed(1)}) ${invSnap} genDest=${generalDestination ? generalDestination.packetSlotId : 'null(full)'} manualSuppress=${Math.max(0, Number(state.manualPotionSuppressUntil || 0) - now)}ms`);
+      ctx.log(`[DIAG] nearbyBags(${bags.length}): ${bagSummary}`);
+    }
+
     for (const bag of bags) {
       const distance = Math.hypot(Number(bag.pos?.x || 0) - playerPos.x, Number(bag.pos?.y || 0) - playerPos.y);
       if (!Number.isFinite(distance) || distance > ON_TOP_DISTANCE) continue;
-      if (shouldDelayPublicBag(bag, state, now)) continue;
+      if (shouldDelayPublicBag(bag, state, now)) {
+        diagLog(`bag#${bag.objectId} skip — public delay`);
+        continue;
+      }
 
       for (let bagSlot = 0; bagSlot < 8; bagSlot++) {
         const itemId = getBagItemId(bag, bagSlot);
+        if (itemId <= 0) continue;
         const bagSlotKey = makeBagSlotKey(bag, bagSlot, itemId);
 
         if (now < Number(state.manualPotionSuppressUntil || 0)) {
+          diagLog(`bag#${bag.objectId} slot=${bagSlot} item=${itemId} skip — manualSuppress ${Math.ceil(Number(state.manualPotionSuppressUntil) - now)}ms`);
           continue;
         }
 
         if (Number(state.consumedBagSlots.get(bagSlotKey) || 0) > now) {
+          diagLog(`bag#${bag.objectId} slot=${bagSlot} item=${itemId} skip — consumedBagSlot`);
           continue;
         }
 
         const isStat = STAT_POTION_IDS.has(itemId);
         if (isStat) {
-          if (!canInteractWithStatPotOnBag(itemId)) continue;
+          if (!canInteractWithStatPotOnBag(itemId)) {
+            diagLog(`bag#${bag.objectId} slot=${bagSlot} item=${itemId}(${getItemDisplayName(itemId)}) skip — statPot not interactable (lootStat=${lootStatPotions} autodrink=${autodrinkStatPots} blacklist=${blacklist.has(itemId)})`);
+            continue;
+          }
         } else if (!shouldLootItem(itemId)) {
+          diagLog(`bag#${bag.objectId} slot=${bagSlot} item=${itemId}(${getItemDisplayName(itemId)}) skip — shouldLootItem=false`);
           continue;
         }
-        if (!passesMinEnchantGate(itemId, bag, bagSlot)) continue;
+        if (!passesMinEnchantGate(itemId, bag, bagSlot)) {
+          diagLog(`bag#${bag.objectId} slot=${bagSlot} item=${itemId} skip — enchant gate`);
+          continue;
+        }
 
         if (autodrinkStatPots && isStat) {
           if (
@@ -1358,12 +1444,17 @@ export function register(ctx: PluginContext) {
               (ct) => ctx.gameData!.getPlayerClassStatMaxes(ct),
             )
           ) {
+            diagLog(`bag#${bag.objectId} slot=${bagSlot} item=${itemId} skip — autodrink class cap`);
             continue;
           }
           const attemptKey = `drink:${bag.objectId}:${bagSlot}:${itemId}`;
           const lastAttempt = Number(state.recentAttempts.get(attemptKey) || 0);
-          if ((now - lastAttempt) < RETRY_ITEM_AFTER_MS) continue;
+          if ((now - lastAttempt) < RETRY_ITEM_AFTER_MS) {
+            diagLog(`bag#${bag.objectId} slot=${bagSlot} item=${itemId} skip — autodrink cooldown ${RETRY_ITEM_AFTER_MS - (now - lastAttempt)}ms`);
+            continue;
+          }
 
+          ctx.log(`[DIAG] SEND autodrink USEITEM bag#${bag.objectId} slot=${bagSlot} item=${itemId}(${getItemDisplayName(itemId)}) ${diagInventorySnapshot(client)}`);
           sendUseItemFromBag(client, bag, bagSlot, itemId);
           state.lastPickupAt = now;
           state.recentAttempts.set(attemptKey, now);
@@ -1372,30 +1463,26 @@ export function register(ctx: PluginContext) {
 
         const destination = getQuickslotDestination(client, itemId) ?? generalDestination;
 
-        // DEBUG: UT candidate/destination tracing.
-        // const itemInfoForDebug = catalog.items.get(itemId);
-        // if (itemInfoForDebug?.isUT) {
-        //   ctx.log(
-        //     `[Auto Loot UT DEBUG] candidate="${itemInfoForDebug.name}" ` +
-        //     `id=${itemId} slotType=${itemInfoForDebug.slotType} ` +
-        //     `destination=${destination ? destination.packetSlotId : 'none'} ` +
-        //     `generalDest=${generalDestination ? generalDestination.packetSlotId : 'none'} ` +
-        //     `pending=${state.pendingDestSlotId ?? 'none'} ` +
-        //     `manualSuppressRemaining=${Math.max(0, Number(state.manualPotionSuppressUntil || 0) - now)}ms`,
-        //   );
-        // }
+        diagLog(`bag#${bag.objectId} slot=${bagSlot} item=${itemId}(${getItemDisplayName(itemId)}) dest=${destination ? destination.packetSlotId : 'null'} genDest=${generalDestination ? generalDestination.packetSlotId : 'null(full)'}`);
 
         if (!destination) continue;
 
         const attemptKey = `${bag.objectId}:${bagSlot}:${itemId}`;
         const lastAttempt = Number(state.recentAttempts.get(attemptKey) || 0);
-        if ((now - lastAttempt) < RETRY_ITEM_AFTER_MS) continue;
+        if ((now - lastAttempt) < RETRY_ITEM_AFTER_MS) {
+          diagLog(`bag#${bag.objectId} slot=${bagSlot} item=${itemId} skip — retry cooldown ${RETRY_ITEM_AFTER_MS - (now - lastAttempt)}ms`);
+          continue;
+        }
 
         const expectedQuantity = getExpectedQuickslotQuantity(client, destination, itemId);
+        ctx.log(`[DIAG] SEND INVENTORYSWAP bag#${bag.objectId} slot=${bagSlot} item=${itemId}(${getItemDisplayName(itemId)}) → destSlot=${destination.packetSlotId} ${diagInventorySnapshot(client)}`);
         const sent = sendLootSwap(client, bag, bagSlot, itemId, destination);
-        if (!sent) continue;
+        if (!sent) {
+          ctx.log(`[DIAG] sendLootSwap returned false (manualSuppress active)`);
+          continue;
+        }
 
-                state.lastPickupAt = now;
+        state.lastPickupAt = now;
         state.pendingDestSlotId = destination.packetSlotId;
         state.pendingDestQuantity = expectedQuantity;
         state.pendingPotionItemId = isHpOrMpPotion(itemId) ? itemId : null;
@@ -1407,6 +1494,7 @@ export function register(ctx: PluginContext) {
             Number(state.manualPotionPacketBlockUntil || 0),
             now + blockMs,
           );
+          diagLog(`manualPotionBlock set for ${blockMs}ms`);
         }
 
         state.recentAttempts.set(attemptKey, now);
@@ -1418,6 +1506,8 @@ export function register(ctx: PluginContext) {
         return;
       }
     }
+    // Nothing was sent this pass — rate-limit re-evaluation to avoid re-scanning every tick.
+    state.lastPickupAt = now;
   }
 
   function resetState(client: ClientConnection): void {
@@ -1495,13 +1585,17 @@ export function register(ctx: PluginContext) {
     const pendingHpMpAutoLoot = isPendingHpMpAutoLootActive(state, now);
     const manualPacketBlockActive = now < Number(state.manualPotionPacketBlockUntil || 0);
 
+    ctx.log(`[DIAG] hookAllPackets intercept: ${packet.name} map="${client.playerData.mapName}" pendingHpMpAutoLoot=${pendingHpMpAutoLoot} manualBlockActive=${manualPacketBlockActive} data=${JSON.stringify(packet.data)}`);
+
     if (pendingHpMpAutoLoot || manualPacketBlockActive) {
       packet.send = false;
+      ctx.log(`[DIAG] hookAllPackets BLOCKED ${packet.name} pendingHpMp=${pendingHpMpAutoLoot} blockActive=${manualPacketBlockActive}`);
       blockManualPotionPacketDuringPendingAutoLoot(client, packet.name);
       return;
     }
 
     suppressHpMpPotionLootAfterManualAction(client, packet.name, true);
+    ctx.log(`[DIAG] hookAllPackets ALLOWED ${packet.name} — suppressing potionLoot for ${manualPotionSuppressMs}ms`);
   });
 
   ctx.hookPacket('NEWTICK', (client) => {

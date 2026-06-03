@@ -2584,6 +2584,9 @@
   const pluginSearch = document.getElementById('plugin-search');
   const pluginCategory = document.getElementById('plugin-category');
   const pluginDetail = document.getElementById('plugin-detail');
+  const hotkeysSearch = document.getElementById('hotkeys-search');
+  const hotkeysTableBody = document.getElementById('hotkeys-table-body');
+  const hotkeysStatus = document.getElementById('hotkeys-status');
   let pluginsReceived = false;
   const accountsSearchInput = document.getElementById('accounts-search');
   const accountsCountEl = document.getElementById('accounts-count');
@@ -4518,8 +4521,44 @@
   // Hotkey infrastructure — maps a single key (e.g. "j") to a plugin button setting
   let hotkeyMap = new Map(); // key → { pluginId, key: buttonSettingKey }
 
+  let pluginToggleHotkeyMap = new Map(); // key -> { pluginId, enabled }
+  let capturePluginHotkeyId = null;
+
   document.addEventListener('keydown', (e) => {
+    if (capturePluginHotkeyId) {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (e.key === 'Escape' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        capturePluginHotkeyId = null;
+        setHotkeysStatus('Capture cancelled.', '');
+        renderHotkeysTab();
+        return;
+      }
+      if (isDashboardHotkeyModifierEvent(e)) {
+        setHotkeysStatus('Now press the key to pair with ' + normalizeDashboardModifierPrefix(e) + '.', '');
+        return;
+      }
+      const hotkey = normalizeDashboardHotkeyFromEvent(e);
+      if (!hotkey) {
+        setHotkeysStatus('Unsupported hotkey.', 'error');
+        return;
+      }
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'updatePluginHotkey', pluginId: capturePluginHotkeyId, hotkey: hotkey }));
+        setHotkeysStatus('Saved ' + hotkey + '.', 'ok');
+      }
+      capturePluginHotkeyId = null;
+      return;
+    }
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+    if (e.repeat) return;
+    const normalized = normalizeDashboardHotkeyFromEvent(e);
+    const toggleAction = normalized ? pluginToggleHotkeyMap.get(normalized.toLowerCase()) : null;
+    if (toggleAction && ws && ws.readyState === 1) {
+      e.preventDefault();
+      ws.send(JSON.stringify({ type: 'togglePlugin', pluginId: toggleAction.pluginId, enabled: !toggleAction.enabled }));
+      return;
+    }
     const action = hotkeyMap.get(e.key.toLowerCase());
     if (action) {
       e.preventDefault();
@@ -6583,10 +6622,16 @@
           if (pl.length > 0) pluginsReceived = true;
           allPluginsData = pl;
           renderPlugins(pl);
+          if (activeTab === 'hotkeys') renderHotkeysTab();
           populateServerSelect(pl);
           renderDamageSettings(pl);
           break;
         }
+        case 'pluginHotkeyUpdateError':
+          setHotkeysStatus(msg.reason || 'Could not update hotkey.', 'error');
+          capturePluginHotkeyId = null;
+          renderHotkeysTab();
+          break;
         case 'gameClient':
           updateGameStatus(msg.connected);
           break;
@@ -9504,13 +9549,177 @@
     });
   }
 
+  function normalizeDashboardHotkeyFromEvent(e) {
+    if (!e) return '';
+    if (e.metaKey) return '';
+    var mainKey = '';
+    if (e.code && /^Numpad[0-9]$/.test(e.code)) mainKey = e.code;
+    var rawKey = String(e.key || '');
+    if (!mainKey) {
+      if (rawKey === ' ') mainKey = 'Space';
+      else {
+        var key = rawKey.trim();
+        if (!key) return '';
+        if (key.length === 1) mainKey = key.toUpperCase();
+        else {
+          var aliases = {
+            Escape: 'Escape',
+            Insert: 'Insert',
+            Delete: 'Delete',
+            Home: 'Home',
+            End: 'End',
+            PageUp: 'PageUp',
+            PageDown: 'PageDown',
+            ArrowUp: 'Up',
+            ArrowDown: 'Down',
+            ArrowLeft: 'Left',
+            ArrowRight: 'Right',
+            ' ': 'Space',
+            Spacebar: 'Space',
+            Tab: 'Tab',
+            Backspace: 'Backspace',
+            Enter: 'Enter',
+          };
+          if (/^F([1-9]|1[0-2])$/.test(key)) mainKey = key;
+          else mainKey = aliases[key] || '';
+        }
+      }
+    }
+    if (!mainKey) return '';
+    if (mainKey === 'Shift' || mainKey === 'Control' || mainKey === 'Alt' || mainKey === 'Meta') return '';
+
+    var parts = [];
+    if (e.ctrlKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    parts.push(mainKey);
+    return parts.join('+');
+  }
+
+  function isDashboardHotkeyModifierEvent(e) {
+    if (!e) return false;
+    return e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt';
+  }
+
+  function normalizeDashboardModifierPrefix(e) {
+    var parts = [];
+    if (e && e.ctrlKey) parts.push('Ctrl');
+    if (e && e.altKey) parts.push('Alt');
+    if (e && e.shiftKey) parts.push('Shift');
+    return parts.join('+') || 'the modifier';
+  }
+
+  function setHotkeysStatus(text, kind) {
+    if (!hotkeysStatus) return;
+    hotkeysStatus.textContent = text || '';
+    hotkeysStatus.classList.remove('error', 'ok');
+    if (kind === 'error' || kind === 'ok') hotkeysStatus.classList.add(kind);
+  }
+
+  function renderHotkeysTab() {
+    if (!hotkeysTableBody) return;
+    var query = hotkeysSearch ? String(hotkeysSearch.value || '').trim().toLowerCase() : '';
+    var rows = (Array.isArray(allPluginsData) ? allPluginsData : [])
+      .filter(function (p) { return p && !HIDDEN_PLUGINS.has(p.id); })
+      .filter(function (p) {
+        if (!query) return true;
+        return getPluginDisplayName(p).toLowerCase().indexOf(query) >= 0
+          || String(p.id || '').toLowerCase().indexOf(query) >= 0
+          || String(p.category || '').toLowerCase().indexOf(query) >= 0;
+      })
+      .sort(function (a, b) { return getPluginDisplayName(a).localeCompare(getPluginDisplayName(b)); });
+
+    hotkeysTableBody.innerHTML = '';
+    if (!rows.length) {
+      var emptyTr = document.createElement('tr');
+      var emptyTd = document.createElement('td');
+      emptyTd.colSpan = 5;
+      emptyTd.className = 'hotkeys-empty';
+      emptyTd.textContent = pluginsReceived ? 'No plugins match the current search.' : 'Loading plugins...';
+      emptyTr.appendChild(emptyTd);
+      hotkeysTableBody.appendChild(emptyTr);
+      return;
+    }
+
+    rows.forEach(function (p) {
+      var tr = document.createElement('tr');
+      if (capturePluginHotkeyId === p.id) tr.className = 'hotkeys-capture-row';
+
+      var nameTd = document.createElement('td');
+      var name = document.createElement('div');
+      name.className = 'hotkeys-plugin-name';
+      name.textContent = getPluginDisplayName(p);
+      var id = document.createElement('div');
+      id.className = 'hotkeys-muted';
+      id.textContent = p.id;
+      nameTd.appendChild(name);
+      nameTd.appendChild(id);
+
+      var catTd = document.createElement('td');
+      catTd.textContent = t(PLUGIN_CATEGORY_LABEL_KEYS[p.category || 'utility']) || (p.category || 'utility');
+
+      var statusTd = document.createElement('td');
+      statusTd.textContent = p.hotkeyLocked ? 'Always on' : (p.enabled ? 'Enabled' : 'Disabled');
+
+      var keyTd = document.createElement('td');
+      var key = document.createElement('span');
+      key.className = 'hotkeys-key';
+      key.textContent = capturePluginHotkeyId === p.id ? 'Press key combo' : (p.hotkey || 'None');
+      keyTd.appendChild(key);
+
+      var actionsTd = document.createElement('td');
+      var actions = document.createElement('div');
+      actions.className = 'hotkeys-actions';
+      var setBtn = document.createElement('button');
+      setBtn.type = 'button';
+      setBtn.className = 'setting-btn';
+      setBtn.textContent = capturePluginHotkeyId === p.id ? 'Listening' : 'Set';
+      setBtn.disabled = !!p.hotkeyLocked;
+      setBtn.addEventListener('click', function () {
+        capturePluginHotkeyId = p.id;
+        setHotkeysStatus('Press a key combo for ' + getPluginDisplayName(p) + '. Escape cancels.', '');
+        renderHotkeysTab();
+      });
+      var clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'setting-btn setting-btn-secondary';
+      clearBtn.textContent = 'Clear';
+      clearBtn.disabled = !!p.hotkeyLocked || !p.hotkey;
+      clearBtn.addEventListener('click', function () {
+        if (!ws || ws.readyState !== 1) return;
+        ws.send(JSON.stringify({ type: 'updatePluginHotkey', pluginId: p.id, hotkey: '' }));
+        setHotkeysStatus('Cleared hotkey for ' + getPluginDisplayName(p) + '.', 'ok');
+      });
+      actions.appendChild(setBtn);
+      actions.appendChild(clearBtn);
+      actionsTd.appendChild(actions);
+
+      tr.appendChild(nameTd);
+      tr.appendChild(catTd);
+      tr.appendChild(statusTd);
+      tr.appendChild(keyTd);
+      tr.appendChild(actionsTd);
+      hotkeysTableBody.appendChild(tr);
+    });
+  }
+
+  if (hotkeysSearch) {
+    hotkeysSearch.addEventListener('input', function () {
+      renderHotkeysTab();
+    });
+  }
+
   function renderPlugins(plugins) {
     cachedPluginsForHub = Array.isArray(plugins) ? plugins : [];
     initPluginHubFiltersOnce();
     populatePluginCategorySelect();
 
     hotkeyMap.clear();
+    pluginToggleHotkeyMap.clear();
     cachedPluginsForHub.forEach(function (p) {
+      if (p.hotkey && !p.hotkeyLocked) {
+        pluginToggleHotkeyMap.set(String(p.hotkey).toLowerCase(), { pluginId: p.id, enabled: !!p.enabled });
+      }
       (p.settings || []).forEach(function (s) {
         if (s.hotkeyFor && s.value) {
           hotkeyMap.set(String(s.value).toLowerCase(), { pluginId: p.id, key: s.hotkeyFor });
@@ -11711,6 +11920,22 @@
           renderPlugins(pl);
           populateServerSelect(pl);
           renderDamageSettings(pl);
+        })
+        .catch(function () {});
+    }
+    if (tabName === 'hotkeys') {
+      renderHotkeysTab();
+      fetch('/api/plugins')
+        .then(function (r) {
+          if (!r.ok) throw new Error('bad status');
+          return r.json();
+        })
+        .then(function (data) {
+          var pl = Array.isArray(data) ? data : [];
+          if (pl.length > 0) pluginsReceived = true;
+          allPluginsData = pl;
+          renderPlugins(pl);
+          renderHotkeysTab();
         })
         .catch(function () {});
     }

@@ -2,6 +2,7 @@
 #include "RolloutDodge.h"
 #include "ThreatIndex.h"
 #include "GridThreatIndex.h"
+#include "QuadtreeThreatIndex.h"
 #include "DodgeHit.h"
 #include "DodgeSpeed.h"
 #include "DangerPlanner.h"
@@ -34,6 +35,7 @@ using Threats::Aabb;
 using Threats::ThreatIndex;
 using Threats::BruteForceIndex;
 using Threats::GridThreatIndex;
+using Threats::QuadtreeThreatIndex;
 using Threats::kMaxThreatSamples;
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ std::atomic<int>   g_headingCount { 16 };
 std::atomic<float> g_hitScale     { 1.0f };
 std::atomic<float> g_intentWeight { 1.0f };
 std::atomic<int>   g_rebuildN     { 2 };
-std::atomic<bool>  g_forceBrute   { false };
+std::atomic<int>   g_broadPhase   { 0 };    // 0=Auto 1=Brute 2=Grid 3=Quad
 std::atomic<bool>  g_avoidEnemies { true };
 std::atomic<bool>  g_wasdYield    { true };
 std::atomic<bool>  g_commitDwell  { true };
@@ -71,6 +73,7 @@ std::atomic<bool>  g_drawPath     { false };
 std::vector<Threat> g_threats;
 BruteForceIndex     g_brute;
 GridThreatIndex     g_grid;
+QuadtreeThreatIndex g_quad;
 DodgeSpeed::ObsSpeed g_obs;
 
 int      g_frameCount = 0;
@@ -253,14 +256,17 @@ float RolloutInput(float px, float py, float dirX, float dirY, float reach,
 
 ThreatIndex* ChooseIndex(int threatCount)
 {
-    // Dense field ⇒ uniform grid (sublinear prune); sparse ⇒ brute-force AABB
-    // scan (the always-correct reference). force-brute-force pins brute.
-    if (!g_forceBrute.load(std::memory_order_relaxed) && threatCount >= kGridThreshold) {
-        g_lastBackend = "grid";
-        return &g_grid;
+    // Broad-phase selector (A/B). Explicit Brute / Grid / Quad pin a backend;
+    // Auto uses the uniform grid when the field is dense, else the brute-force
+    // AABB scan (the always-correct reference).
+    switch (g_broadPhase.load(std::memory_order_relaxed)) {
+        case 1: g_lastBackend = "brute"; return &g_brute;
+        case 2: g_lastBackend = "grid";  return &g_grid;
+        case 3: g_lastBackend = "quad";  return &g_quad;
+        default: break;   // Auto
     }
-    g_lastBackend = "brute";
-    return &g_brute;
+    if (threatCount >= kGridThreshold) { g_lastBackend = "grid"; return &g_grid; }
+    g_lastBackend = "brute"; return &g_brute;
 }
 
 // ── The planner: pick the best input this rebuild ─────────────────────────────
@@ -511,8 +517,7 @@ void RenderSettings()
     if (ImGui::Checkbox("Manual WASD yield##rl", &wy)) SetWasdYieldEnabled(wy);
     bool cd = g_commitDwell.load(std::memory_order_relaxed);
     if (ImGui::Checkbox("Commit dwell##rl", &cd)) SetCommitDwellEnabled(cd);
-    bool fb = g_forceBrute.load(std::memory_order_relaxed);
-    if (ImGui::Checkbox("Force brute-force broad-phase (debug)##rl", &fb)) SetForceBruteForce(fb);
+    ImGui::TextDisabled("Broad-phase: %s (set by the dodge mode)", g_lastBackend);
     bool dp = g_drawPath.load(std::memory_order_relaxed);
     if (ImGui::Checkbox("Draw candidate rollouts (debug)##rl", &dp)) SetDrawPathEnabled(dp);
 
@@ -536,8 +541,8 @@ void  SetIntentWeight(float w)  { g_intentWeight.store(std::clamp(w, 0.f, 3.0f),
 float GetIntentWeight()         { return g_intentWeight.load(std::memory_order_relaxed); }
 void  SetRebuildN(int n)        { g_rebuildN.store(std::clamp(n, 1, 10), std::memory_order_relaxed); }
 int   GetRebuildN()             { return g_rebuildN.load(std::memory_order_relaxed); }
-void  SetForceBruteForce(bool b){ g_forceBrute.store(b, std::memory_order_relaxed); }
-bool  GetForceBruteForce()      { return g_forceBrute.load(std::memory_order_relaxed); }
+void  SetBroadPhase(int m)      { g_broadPhase.store(std::clamp(m, 0, 3), std::memory_order_relaxed); }
+int   GetBroadPhase()           { return g_broadPhase.load(std::memory_order_relaxed); }
 void  SetAvoidEnemiesEnabled(bool e){ g_avoidEnemies.store(e, std::memory_order_relaxed); }
 bool  GetAvoidEnemiesEnabled()  { return g_avoidEnemies.load(std::memory_order_relaxed); }
 void  SetWasdYieldEnabled(bool e){ g_wasdYield.store(e, std::memory_order_relaxed); }

@@ -238,6 +238,7 @@
       <div id="content-tabs">
         <button class="content-tab active" data-tab="home" data-icon="H" data-label="Home" data-i18n="tab.home">Home</button>
         <button class="content-tab" data-tab="plugins" data-icon="P" data-label="Plugins" data-i18n="tab.plugins">Plugins</button>
+        <button class="content-tab" data-tab="hotkeys" data-icon="K" data-label="Hotkeys">Hotkeys</button>
         <button class="content-tab admin-only" data-tab="market" data-icon="$" data-label="Market" data-i18n="tab.market">Market</button>
         <button class="content-tab" data-tab="accounts" data-icon="A" data-label="Accounts" data-i18n="tab.accounts">Accounts</button>
         <button class="content-tab admin-only" data-tab="logs" data-icon="L" data-label="Logs" data-i18n="tab.logs">Logs</button>
@@ -439,6 +440,33 @@
               </div>
             </div>
           </main>
+        </div>
+      </div>
+
+      <div id="tab-hotkeys" class="tab-panel" style="display:none;">
+        <div class="hotkeys-page">
+          <div class="hotkeys-toolbar">
+            <div>
+              <h2 class="hotkeys-title">Plugin Hotkeys</h2>
+              <p class="hotkeys-subtitle">Bind a key to toggle each plugin while the game window is focused.</p>
+            </div>
+            <input type="search" id="hotkeys-search" class="hotkeys-search" placeholder="Search plugins..." autocomplete="off" spellcheck="false" aria-label="Search plugin hotkeys">
+          </div>
+          <div id="hotkeys-status" class="hotkeys-status" aria-live="polite"></div>
+          <div class="hotkeys-table-wrap">
+            <table class="hotkeys-table">
+              <thead>
+                <tr>
+                  <th>Plugin</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Hotkey</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="hotkeys-table-body"></tbody>
+            </table>
+          </div>
         </div>
       </div>
 

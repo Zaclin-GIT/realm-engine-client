@@ -114,6 +114,12 @@ export class PlayerData {
   backpackTier = 0;
   /** Only used when tier is 0; stat 75 can still imply backpack on older payloads. */
   legacyHasBackpackStat75 = false;
+  /**
+   * True if the server has ever reported a non-empty QuickSlot2 (itemType > 0).
+   * The server sends QuickSlot2 as a -1 placeholder for 2-quickslot characters, so
+   * we only confirm the 3rd slot exists when an actual item appears in it.
+   */
+  hasThirdQuickSlot = false;
 
   /** Last VAULTCONTENT grid for main vault (-1 = empty). Cleared on map change. */
   vaultContent: number[] = [];
@@ -228,7 +234,12 @@ export class PlayerData {
         break;
       case StatType.QuickSlot0: this.quickSlots[0] = { itemType: toStatInt(value), quantity: Math.max(0, toStatInt(stackCount ?? 0)) }; break;
       case StatType.QuickSlot1: this.quickSlots[1] = { itemType: toStatInt(value), quantity: Math.max(0, toStatInt(stackCount ?? 0)) }; break;
-      case StatType.QuickSlot2: this.quickSlots[2] = { itemType: toStatInt(value), quantity: Math.max(0, toStatInt(stackCount ?? 0)) }; break;
+      case StatType.QuickSlot2: {
+        const qs2ItemType = toStatInt(value);
+        this.quickSlots[2] = { itemType: qs2ItemType, quantity: Math.max(0, toStatInt(stackCount ?? 0)) };
+        if (qs2ItemType > 0) this.hasThirdQuickSlot = true;
+        break;
+      }
       case StatType.WireExaltAttack: this.exaltedAttack = toStatInt(value); break; // 105 -> subtract from 48
       case StatType.WireExaltDefense: this.exaltedDefense = toStatInt(value); break; // 106 -> from 49
       case StatType.WireExaltSpeed: this.exaltedSpeed = toStatInt(value); break; // 107 -> from 50

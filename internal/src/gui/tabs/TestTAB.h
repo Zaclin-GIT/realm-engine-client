@@ -8,10 +8,11 @@
 namespace TestTAB {
 
 enum class DodgeMode : int {
-    Off     = 0,
-    XDodge  = 1,  // Spacetime BFS ported from XRebuild/XDriver. Movement via NativeMoveTo.
-    Rollout = 2,  // Forward input-simulation + uniform-grid broad-phase (RolloutDodge).
-    ZDodge  = 3,  // Intent-preserving slide-assist dodge (zdodge).
+    Off         = 0,
+    XDodge      = 1,  // Spacetime BFS ported from XRebuild/XDriver. Movement via NativeMoveTo.
+    RolloutGrid = 2,  // Forward input-simulation, uniform-grid broad-phase (RolloutDodge).
+    RolloutQuad = 3,  // Same engine, quadtree broad-phase (A/B against the grid version).
+    ZDodge      = 4,  // Intent-preserving slide-assist dodge (zdodge).
 };
 
 DodgeMode GetDodgeMode();

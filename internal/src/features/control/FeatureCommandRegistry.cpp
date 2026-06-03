@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "FeatureState.h"
+#include "FeatureRuntime.h"
 #include "FloatingTextService.h"
 #include "FeatureCommandRegistry.h"
 
@@ -166,7 +167,6 @@ namespace {
             FH_FLOAT("rolloutHitScale", RolloutDodge::SetHitScale),
             FH_FLOAT("rolloutIntentWeight", RolloutDodge::SetIntentWeight),
             FH_INT("rolloutRebuildN", RolloutDodge::SetRebuildN),
-            FH_INT_BOOL("rolloutForceBrute", RolloutDodge::SetForceBruteForce),
             FH_INT_BOOL("rolloutAvoidEnemies", RolloutDodge::SetAvoidEnemiesEnabled),
             FH_INT_BOOL("rolloutWasdYield", RolloutDodge::SetWasdYieldEnabled),
             FH_INT_BOOL("rolloutCommitDwell", RolloutDodge::SetCommitDwellEnabled),
@@ -205,6 +205,7 @@ namespace {
             FH("playerNoclipHotkey",      FeatureState::SetPlayerNoclipHotkeyVk(ResolveHotkeyVkInternal(f.value))),
             FH("socketHotkeyActive",      FeatureState::SetSocketHotkeyActive(f.Bool())),
             FH("socketHotkey",            FeatureState::SetSocketHotkeyVk(ResolveHotkeyVkInternal(f.value))),
+            FH("pluginToggleHotkeys",     FeatureRuntime::ApplyPluginToggleHotkeys(f.value)),
             FH("walkTargetX",             FeatureState::SetWalkTarget(f.Float(), FeatureState::GetWalkTargetY(), FeatureState::GetWalkTargetActive())),
             FH("walkTargetY",             FeatureState::SetWalkTarget(FeatureState::GetWalkTargetX(), f.Float(), FeatureState::GetWalkTargetActive())),
             FH("walkTargetActive",        FeatureState::SetWalkTarget(FeatureState::GetWalkTargetX(), FeatureState::GetWalkTargetY(), f.Bool())),

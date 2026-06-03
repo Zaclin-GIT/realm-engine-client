@@ -2,12 +2,13 @@ import type { PluginContext } from '../src/plugins/PluginContext.js';
 import { sendDllFeature } from '../src/bridge/DllFeatureBus.js';
 
 // Maps the dashboard string value to the C++ TestTAB::DodgeMode enum.
-// Off=0, XDodge=1, Rollout=2, zDodge=3.
+// Off=0, XDodge=1, RolloutGrid=2, RolloutQuad=3, zDodge=4.
 // XDodge uses A* (goal-directed) with BFS fallback (immediate escape),
-// ported from XRebuild/XDriver decompile. Rollout (RE-Sim) does per-input
-// forward simulation against a uniform-grid broad-phase. zDodge is an
+// ported from XRebuild/XDriver decompile. RE-Sim does per-input forward
+// simulation; the two RE-Sim modes differ only in broad-phase backend
+// (grid vs quadtree) so they can be A/B-compared. zDodge is an
 // intent-preserving slide-assist dodge.
-const DODGE_VALUES = ['off', 'xdodge', 'rollout', 'zdodge'] as const;
+const DODGE_VALUES = ['off', 'xdodge', 'rollout-grid', 'rollout-quad', 'zdodge'] as const;
 type ActiveDodgeMode = Exclude<(typeof DODGE_VALUES)[number], 'off'>;
 type SettingConfig = Parameters<PluginContext['registerSetting']>[1];
 type SettingCallback = Parameters<PluginContext['registerSetting']>[2];
@@ -32,26 +33,32 @@ export function register(ctx: PluginContext) {
     sendDllFeature('autoDodgeMode', mode);
   }
 
+  // `mode` may be a single dodge mode or several — settings shown for the RE-Sim
+  // family pass both broad-phase variants so they stay visible across grid/quad.
   function registerModeSetting(
-    mode: ActiveDodgeMode,
+    mode: ActiveDodgeMode | ActiveDodgeMode[],
     key: string,
     config: SettingConfig,
     onChange?: SettingCallback,
   ) {
-    ctx.registerSetting(key, {
-      ...config,
-      visibleWhen: { key: 'dodgeMode', value: mode },
-    }, onChange);
+    const visibleWhen = Array.isArray(mode)
+      ? { key: 'dodgeMode', values: mode }
+      : { key: 'dodgeMode', value: mode };
+    ctx.registerSetting(key, { ...config, visibleWhen }, onChange);
   }
+
+  // The two RE-Sim broad-phase modes share one settings group.
+  const ROLLOUT_MODES: ActiveDodgeMode[] = ['rollout-grid', 'rollout-quad'];
 
   ctx.registerSetting('dodgeMode', {
     label: 'Dodge mode',
     type: 'select',
-    value: 'zdodge',
+    value: 'xdodge',
     options: [
       { label: 'Off', value: 'off' },
       { label: 'RE-Plus', value: 'xdodge' },
-      { label: 'RE-Sim', value: 'rollout' },
+      { label: 'RE-Sim (Grid)', value: 'rollout-grid' },
+      { label: 'RE-Sim (Quadtree)', value: 'rollout-quad' },
       { label: 'zDodge', value: 'zdodge' },
     ],
   }, () => flush());
@@ -272,39 +279,37 @@ export function register(ctx: PluginContext) {
   // Forward input-simulation dodge: per candidate heading, roll the player
   // forward N ticks and CCD-test the swept path against predicted bullets,
   // using a uniform-grid broad-phase. Active when Dodge mode = RE-Sim.
-  registerModeSetting('rollout', 'rolloutHorizonTicks', {
+  registerModeSetting(ROLLOUT_MODES, 'rolloutHorizonTicks', {
     label: '[RE-Sim] Horizon (ticks)',
     type: 'range', value: 4, min: 1, max: 8, step: 1,
   }, (v: number) => sendDllFeature('rolloutHorizonTicks', v));
-  registerModeSetting('rollout', 'rolloutSampleStepMs', {
+  registerModeSetting(ROLLOUT_MODES, 'rolloutSampleStepMs', {
     label: '[RE-Sim] Sample step (ms)', advanced: true,
     type: 'range', value: 25, min: 10, max: 60, step: 5,
   }, (v: number) => sendDllFeature('rolloutSampleStepMs', v));
-  registerModeSetting('rollout', 'rolloutHeadings', {
+  registerModeSetting(ROLLOUT_MODES, 'rolloutHeadings', {
     label: '[RE-Sim] Candidate headings',
     type: 'range', value: 16, min: 8, max: 24, step: 1,
   }, (v: number) => sendDllFeature('rolloutHeadings', v));
-  registerModeSetting('rollout', 'rolloutHitScale', {
+  registerModeSetting(ROLLOUT_MODES, 'rolloutHitScale', {
     label: '[RE-Sim] Hit scale', advanced: true,
     type: 'range', value: 1, min: 0.5, max: 2, step: 0.05,
   }, (v: number) => sendDllFeature('rolloutHitScale', v));
-  registerModeSetting('rollout', 'rolloutIntentWeight', {
+  registerModeSetting(ROLLOUT_MODES, 'rolloutIntentWeight', {
     label: '[RE-Sim] Intent weight (pull toward goal)',
     type: 'range', value: 1, min: 0, max: 3, step: 0.1,
   }, (v: number) => sendDllFeature('rolloutIntentWeight', v));
-  registerModeSetting('rollout', 'rolloutRebuildN', {
+  registerModeSetting(ROLLOUT_MODES, 'rolloutRebuildN', {
     label: '[RE-Sim] Rebuild every N frames', advanced: true,
     type: 'range', value: 2, min: 1, max: 10, step: 1,
   }, (v: number) => sendDllFeature('rolloutRebuildN', v));
-  registerModeSetting('rollout', 'rolloutAvoidEnemies', onOff('[RE-Sim] Never stand on enemies / bosses'),
+  registerModeSetting(ROLLOUT_MODES, 'rolloutAvoidEnemies', onOff('[RE-Sim] Never stand on enemies / bosses'),
     (v: string) => sendDllFeature('rolloutAvoidEnemies', v === 'on' ? 1 : 0));
-  registerModeSetting('rollout', 'rolloutWasdYield', onOff('[RE-Sim] Yield to manual WASD'),
+  registerModeSetting(ROLLOUT_MODES, 'rolloutWasdYield', onOff('[RE-Sim] Yield to manual WASD'),
     (v: string) => sendDllFeature('rolloutWasdYield', v === 'on' ? 1 : 0));
-  registerModeSetting('rollout', 'rolloutCommitDwell', onOff('[RE-Sim] Commit dwell (no direction flip-flop)'),
+  registerModeSetting(ROLLOUT_MODES, 'rolloutCommitDwell', onOff('[RE-Sim] Commit dwell (no direction flip-flop)'),
     (v: string) => sendDllFeature('rolloutCommitDwell', v === 'on' ? 1 : 0));
-  registerModeSetting('rollout', 'rolloutForceBrute', onOff('[RE-Sim] Force brute-force broad-phase (debug)', 'off'),
-    (v: string) => sendDllFeature('rolloutForceBrute', v === 'on' ? 1 : 0));
-  registerModeSetting('rollout', 'rolloutDrawPath', onOff('[RE-Sim] Draw candidate rollouts (debug)', 'off'),
+  registerModeSetting(ROLLOUT_MODES, 'rolloutDrawPath', onOff('[RE-Sim] Draw candidate rollouts (debug)', 'off'),
     (v: string) => sendDllFeature('rolloutDrawPath', v === 'on' ? 1 : 0));
 
   function syncModeSettings() {
@@ -330,7 +335,7 @@ export function register(ctx: PluginContext) {
     sendDllFeature('rolloutHitScale',      ctx.getSetting<number>('rolloutHitScale'));
     sendDllFeature('rolloutIntentWeight',  ctx.getSetting<number>('rolloutIntentWeight'));
     sendDllFeature('rolloutRebuildN',      ctx.getSetting<number>('rolloutRebuildN'));
-    for (const k of ['rolloutAvoidEnemies', 'rolloutWasdYield', 'rolloutCommitDwell', 'rolloutForceBrute', 'rolloutDrawPath'])
+    for (const k of ['rolloutAvoidEnemies', 'rolloutWasdYield', 'rolloutCommitDwell', 'rolloutDrawPath'])
       sendDllFeature(k, ctx.getSetting<string>(k) === 'on' ? 1 : 0);
     // zDodge settings.
     sendDllFeature('zdodgeReactWindowMs', ctx.getSetting<number>('zdodgeReactWindowMs'));

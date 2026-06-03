@@ -12,6 +12,7 @@
 #include "pch-il2cpp.h"
 #include "FeatureRuntime.h"
 #include "FeatureState.h"
+#include "FeatureCommandRegistry.h"
 #include "FloatingTextService.h"
 #include "GameState.h"
 #include "AutoAim.h"
@@ -24,6 +25,9 @@
 
 #include <limits>
 #include <climits>
+#include <cctype>
+#include <cstring>
+#include <string>
 
 namespace {
 
@@ -140,6 +144,85 @@ namespace {
         }
     }
 
+    // ── Plugin toggle hotkeys (owner feature) ────────────────────────────────
+    struct PluginToggleHotkeyBinding {
+        char pluginId[96];
+        int  mainVk;
+        bool requireShift;
+        bool requireCtrl;
+        bool requireAlt;
+        bool lastDown;
+    };
+    std::vector<PluginToggleHotkeyBinding> s_pluginToggleHotkeys;
+
+    bool IsVkDown(int vk)    { return ((GetAsyncKeyState(vk) | GetKeyState(vk)) & 0x8000) != 0; }
+    bool IsShiftDown()       { return IsVkDown(VK_SHIFT)   || IsVkDown(VK_LSHIFT)   || IsVkDown(VK_RSHIFT); }
+    bool IsCtrlDown()        { return IsVkDown(VK_CONTROL) || IsVkDown(VK_LCONTROL) || IsVkDown(VK_RCONTROL); }
+    bool IsAltDown()         { return IsVkDown(VK_MENU)    || IsVkDown(VK_LMENU)    || IsVkDown(VK_RMENU); }
+
+    bool ParsePluginToggleHotkey(const char* raw, PluginToggleHotkeyBinding& binding)
+    {
+        if (!raw) return false;
+        std::string input(raw);
+        size_t start = 0;
+        int mainVk = 0;
+        bool requireShift = false, requireCtrl = false, requireAlt = false;
+        while (start <= input.size()) {
+            const size_t end = input.find('+', start);
+            std::string part = input.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            std::string compact;
+            for (const char ch : part) {
+                const unsigned char c = static_cast<unsigned char>(ch);
+                if (!std::isspace(c)) compact.push_back(static_cast<char>(std::toupper(c)));
+            }
+            if (!compact.empty()) {
+                if (compact == "SHIFT") {
+                    requireShift = true;
+                } else if (compact == "CTRL" || compact == "CONTROL") {
+                    requireCtrl = true;
+                } else if (compact == "ALT" || compact == "MENU") {
+                    requireAlt = true;
+                } else {
+                    if (mainVk != 0) return false;
+                    mainVk = FeatureCommandRegistry::ResolveHotkeyVk(compact.c_str());
+                    if (mainVk == VK_SHIFT || mainVk == VK_CONTROL || mainVk == VK_MENU) return false;
+                }
+            }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+        if (mainVk == 0) return false;
+        binding.mainVk = mainVk;
+        binding.requireShift = requireShift;
+        binding.requireCtrl = requireCtrl;
+        binding.requireAlt = requireAlt;
+        return true;
+    }
+
+    bool IsPluginToggleHotkeyDown(const PluginToggleHotkeyBinding& binding, bool foreground)
+    {
+        if (!foreground || binding.mainVk == 0) return false;
+        if (binding.requireShift && !IsShiftDown()) return false;
+        if (binding.requireCtrl && !IsCtrlDown()) return false;
+        if (binding.requireAlt && !IsAltDown()) return false;
+        return IsVkDown(binding.mainVk);
+    }
+
+    bool IsPluginHotkeyIdSafe(const char* s)
+    {
+        if (!s || !*s) return false;
+        const size_t len = strlen(s);
+        if (len >= 96) return false;
+        for (size_t i = 0; i < len; ++i) {
+            const char c = s[i];
+            const bool ok =
+                (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
+            if (!ok) return false;
+        }
+        return true;
+    }
+
 } // namespace
 
 bool FeatureRuntime::PollSocketHotkeyEvent()
@@ -151,6 +234,45 @@ bool FeatureRuntime::PollSocketHotkeyEvent()
     const bool shouldFire = hotkeyDown && !s_lastHotkeyDown;
     s_lastHotkeyDown = hotkeyDown;
     return shouldFire;
+}
+
+void FeatureRuntime::ApplyPluginToggleHotkeys(const char* spec)
+{
+    s_pluginToggleHotkeys.clear();
+    if (!spec || !*spec) return;
+
+    std::string input(spec);
+    size_t start = 0;
+    while (start < input.size()) {
+        const size_t end = input.find(';', start);
+        const std::string token = input.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        const size_t eq = token.find('=');
+        if (eq != std::string::npos) {
+            const std::string pluginId = token.substr(0, eq);
+            const std::string hotkey = token.substr(eq + 1);
+            if (IsPluginHotkeyIdSafe(pluginId.c_str())) {
+                PluginToggleHotkeyBinding binding{};
+                if (ParsePluginToggleHotkey(hotkey.c_str(), binding)) {
+                    strncpy_s(binding.pluginId, sizeof(binding.pluginId), pluginId.c_str(), _TRUNCATE);
+                    binding.lastDown = IsPluginToggleHotkeyDown(binding, IsCurrentProcessForeground());
+                    s_pluginToggleHotkeys.push_back(binding);
+                }
+            }
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+}
+
+void FeatureRuntime::CollectPluginToggleHotkeyEvents(std::vector<std::string>& outPluginIds)
+{
+    if (s_pluginToggleHotkeys.empty()) return;
+    const bool foreground = IsCurrentProcessForeground();
+    for (auto& binding : s_pluginToggleHotkeys) {
+        const bool down = IsPluginToggleHotkeyDown(binding, foreground);
+        if (down && !binding.lastDown) outPluginIds.emplace_back(binding.pluginId);
+        binding.lastDown = down;
+    }
 }
 
 void FeatureRuntime::ApplyOverrides()

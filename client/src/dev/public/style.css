@@ -7288,6 +7288,139 @@ body.theme-mist .rotmg-item-sprite {
   100% { background-position: -200% 0; }
 }
 
+/* Plugin hotkeys */
+.hotkeys-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  padding: 14px;
+}
+
+.hotkeys-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.hotkeys-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0;
+}
+
+.hotkeys-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.hotkeys-search {
+  width: min(280px, 42vw);
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.hotkeys-search:focus {
+  outline: none;
+  border-color: var(--border-hover);
+}
+
+.hotkeys-status {
+  min-height: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.hotkeys-status.error { color: var(--danger); }
+.hotkeys-status.ok { color: var(--success); }
+
+.hotkeys-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+.hotkeys-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.hotkeys-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.hotkeys-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  vertical-align: middle;
+}
+
+body.light-mode .hotkeys-table td,
+body.theme-light .hotkeys-table td {
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+
+.hotkeys-plugin-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.hotkeys-muted {
+  color: var(--text-muted);
+}
+
+.hotkeys-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--plugin-settings-bg);
+  color: var(--text);
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace;
+  font-size: 12px;
+}
+
+.hotkeys-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hotkeys-capture-row td {
+  background: rgba(47, 129, 247, 0.08);
+}
+
+.hotkeys-empty {
+  padding: 34px 16px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .empty-state {
   text-align: center;
   color: var(--text-muted);

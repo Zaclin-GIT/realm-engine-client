@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-// RolloutDodge — forward input-simulation dodge (DodgeMode::Rollout = 2).
+// RolloutDodge — forward input-simulation dodge (DodgeMode::RolloutGrid = 2 / RolloutQuad = 3).
 //
 // Instead of asking "is this cell occupied at time-slice t?" (XDodge's
 // discretized spacetime danger grid), this asks the direct question:
@@ -57,9 +57,11 @@ float GetIntentWeight();
 // re-issued each frame). 1..10, default 2.
 void  SetRebuildN(int n);
 int   GetRebuildN();
-// Debug: force the brute-force broad-phase (bypass the grid). Default off.
-void  SetForceBruteForce(bool on);
-bool  GetForceBruteForce();
+// Broad-phase backend selector (for A/B): 0 = Auto (grid when dense, else
+// brute-force), 1 = Brute-force, 2 = Grid, 3 = Quadtree. Default Auto. The
+// dodge mode (RolloutGrid / RolloutQuad) sets this on enter.
+void  SetBroadPhase(int mode);
+int   GetBroadPhase();
 // Never stand on enemy bodies (contact damage): stamp live enemies as static
 // threats so the rollout routes around them. Default on.
 void  SetAvoidEnemiesEnabled(bool en);

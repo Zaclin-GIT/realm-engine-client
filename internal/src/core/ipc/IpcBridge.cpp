@@ -27,6 +27,7 @@
 #include <atomic>
 #include <mutex>
 #include <vector>
+#include <string>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -248,7 +249,7 @@ static bool ParseSetFeatureCommand(char* json, const char* seqStr, const char* m
     } else {
         return false;
     }
-    char payload[256] = {};
+    char payload[8192] = {};
     snprintf(payload, sizeof(payload), "%s|%s|%s", out->key, out->valueType, out->value);
     if (!IpcSession::VerifyClientSeqAndMac(&s_auth, seqStr, macHex, "setFeature", payload)) {
         DBG_FILE_LOG("[IpcBridge] setFeature HMAC REJECTED: key=" << out->key << " valueType=" << out->valueType << " value=" << out->value);
@@ -446,6 +447,16 @@ DWORD WINAPI IpcBridgeThread(LPVOID)
                     connected = false;
                     break;
                 }
+
+                std::vector<std::string> pluginToggleEvents;
+                FeatureRuntime::CollectPluginToggleHotkeyEvents(pluginToggleEvents);
+                for (const auto& pluginId : pluginToggleEvents) {
+                    if (!WriteSignedHotkeyEvent(hPipe, msgBuf, sizeof(msgBuf), pluginId.c_str(), "togglePlugin", true)) {
+                        connected = false;
+                        break;
+                    }
+                }
+                if (!connected) break;
 
                 const int noclipEnabled = FeatureState::ConsumePendingPlayerNoclipEnabled();
                 if (noclipEnabled >= 0 && !WriteSignedHotkeyEvent(hPipe, msgBuf, sizeof(msgBuf), "player-noclip", "noclipEnabled", noclipEnabled != 0)) {
