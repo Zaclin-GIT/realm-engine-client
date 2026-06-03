@@ -22,7 +22,7 @@
 #include "DangerPlanner.h"
 #include "XDodge.h"
 #include "RolloutDodge.h"
-#include "ZaclinDodge.h"
+#include "ZDodge.h"
 #include "SpeedHack.h"
 #include <string>
 #include <cctype>
@@ -178,21 +178,21 @@ namespace {
     bool ApplyZDodgeFeature(const FeatureCommand& f)
     {
         static const FeatureHandler h[] = {
-            FH_FLOAT("zdodgeReactWindowMs", ZaclinDodge::SetReactWindowMs),
-            FH_FLOAT("zdodgeMaxMoveTiles", ZaclinDodge::SetMaxMoveTiles),
-            FH_FLOAT("zdodgePlayerRadius", ZaclinDodge::SetPlayerRadius),
-            FH_FLOAT("zdodgeProjectileHitScale", ZaclinDodge::SetProjectileHitScale),
-            FH_FLOAT("zdodgeProjectileRadiusFallback", ZaclinDodge::SetProjectileRadiusFallback),
-            FH_FLOAT("zdodgeClearanceTiles", ZaclinDodge::SetClearanceTiles),
-            FH_FLOAT("zdodgeSampleStepMs", ZaclinDodge::SetSampleStepMs),
-            FH_FLOAT("zdodgePerpWeight", ZaclinDodge::SetPerpWeight),
-            FH_FLOAT("zdodgeIntentWeight", ZaclinDodge::SetIntentWeight),
-            FH_FLOAT("zdodgeClearanceWeight", ZaclinDodge::SetClearanceWeight),
-            FH_FLOAT("zdodgeBackpedalPenalty", ZaclinDodge::SetBackpedalPenalty),
-            FH_FLOAT("zdodgeEnemyAvoidanceRadius", ZaclinDodge::SetEnemyAvoidanceRadius),
-            FH_FLOAT("zdodgeDamageThresholdPct", ZaclinDodge::SetDamageThresholdPct),
-            FH_INT_BOOL("zdodgeDebugOverlay", ZaclinDodge::SetDebugOverlay),
-            FH_INT_BOOL("zdodgeCandidateOverlay", ZaclinDodge::SetCandidateOverlay)
+            FH_FLOAT("zdodgeReactWindowMs", ZDodge::SetReactWindowMs),
+            FH_FLOAT("zdodgeMaxMoveTiles", ZDodge::SetMaxMoveTiles),
+            FH_FLOAT("zdodgePlayerRadius", ZDodge::SetPlayerRadius),
+            FH_FLOAT("zdodgeProjectileHitScale", ZDodge::SetProjectileHitScale),
+            FH_FLOAT("zdodgeProjectileRadiusFallback", ZDodge::SetProjectileRadiusFallback),
+            FH_FLOAT("zdodgeClearanceTiles", ZDodge::SetClearanceTiles),
+            FH_FLOAT("zdodgeSampleStepMs", ZDodge::SetSampleStepMs),
+            FH_FLOAT("zdodgePerpWeight", ZDodge::SetPerpWeight),
+            FH_FLOAT("zdodgeIntentWeight", ZDodge::SetIntentWeight),
+            FH_FLOAT("zdodgeClearanceWeight", ZDodge::SetClearanceWeight),
+            FH_FLOAT("zdodgeBackpedalPenalty", ZDodge::SetBackpedalPenalty),
+            FH_FLOAT("zdodgeEnemyAvoidanceRadius", ZDodge::SetEnemyAvoidanceRadius),
+            FH_FLOAT("zdodgeDamageThresholdPct", ZDodge::SetDamageThresholdPct),
+            FH_INT_BOOL("zdodgeDebugOverlay", ZDodge::SetDebugOverlay),
+            FH_INT_BOOL("zdodgeCandidateOverlay", ZDodge::SetCandidateOverlay)
         };
         return ApplyFeatureTable(f, h, sizeof(h) / sizeof(h[0]));
     }

@@ -1,5 +1,5 @@
 #include "pch-il2cpp.h"
-#include "ZaclinDodgeSensors.h"
+#include "ZDodgeSensors.h"
 
 #include "AoeTracking.h"
 #include "AutoAim.h"
@@ -11,7 +11,7 @@
 #include <vector>
 #include <windows.h>
 
-namespace ZaclinDodge::Sensors {
+namespace ZDodge::Sensors {
 namespace {
 
 constexpr float kThreatCullTiles = 14.f;
@@ -217,4 +217,4 @@ SensorSnapshot Build(float playerX, float playerY, const Settings& settings)
     return out;
 }
 
-} // namespace ZaclinDodge::Sensors
+} // namespace ZDodge::Sensors

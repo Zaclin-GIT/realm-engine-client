@@ -1,10 +1,10 @@
 #include "pch-il2cpp.h"
-#include "ZaclinDodgePlanner.h"
+#include "ZDodgePlanner.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace ZaclinDodge::Planner {
+namespace ZDodge::Planner {
 namespace {
 
 constexpr float kDefaultFrameMs = 16.667f;
@@ -487,4 +487,4 @@ PlanResult Evaluate(const PlanRequest& req)
     return out;
 }
 
-} // namespace ZaclinDodge::Planner
+} // namespace ZDodge::Planner

@@ -1,14 +1,14 @@
 #include "pch-il2cpp.h"
-#include "ZaclinDodge.h"
+#include "ZDodge.h"
 
-#include "ZaclinDodgeDebug.h"
-#include "ZaclinDodgePlanner.h"
-#include "ZaclinDodgeSensors.h"
+#include "ZDodgeDebug.h"
+#include "ZDodgePlanner.h"
+#include "ZDodgeSensors.h"
 
 #include "MovementRuntime.h"
 #include "ProjectileTracking.h"
 #include "SteerInput.h"
-#include "ZaclinDodgeTarget.h"
+#include "ZDodgeTarget.h"
 #include "AutoAim.h"
 #include "gui/tabs/WorldTAB.h"
 #include "gui/tabs/TestTAB.h"
@@ -19,7 +19,7 @@
 #include <cmath>
 #include <mutex>
 
-namespace ZaclinDodge {
+namespace ZDodge {
 namespace {
 
 std::atomic<bool> g_enabled{ false };
@@ -344,4 +344,4 @@ bool GetDebugOverlay() { return g_debugOverlay.load(std::memory_order_relaxed); 
 void SetCandidateOverlay(bool enabled) { g_candidateOverlay.store(enabled, std::memory_order_relaxed); }
 bool GetCandidateOverlay() { return g_candidateOverlay.load(std::memory_order_relaxed); }
 
-} // namespace ZaclinDodge
+} // namespace ZDodge

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ZaclinDodgeTypes.h"
+#include "ZDodgeTypes.h"
 
-namespace ZaclinDodge::Debug {
+namespace ZDodge::Debug {
 
 void Render(const DebugSnapshot& snapshot, const Settings& settings, float camX, float camY, float angle, float zoom, float cx, float cy);
 
-} // namespace ZaclinDodge::Debug
+} // namespace ZDodge::Debug

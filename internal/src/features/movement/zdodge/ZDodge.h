@@ -1,6 +1,6 @@
 #pragma once
 
-namespace ZaclinDodge {
+namespace ZDodge {
 
 void SetEnabled(bool enabled);
 bool IsEnabled();
@@ -40,4 +40,4 @@ bool GetDebugOverlay();
 void SetCandidateOverlay(bool enabled);
 bool GetCandidateOverlay();
 
-} // namespace ZaclinDodge
+} // namespace ZDodge

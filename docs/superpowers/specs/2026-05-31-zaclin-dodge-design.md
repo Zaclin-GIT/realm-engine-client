@@ -6,7 +6,7 @@ Date: 2026-05-31
 
 The current dodge feature is too large, difficult to reason about, and unreliable in-game. It sometimes moves the player, but it is not consistently good at avoiding projectiles and has accumulated many interacting systems, toggles, and bug-prone behaviors.
 
-This design introduces a new selectable dodge mode named `ZaclinDodge`, inspired by `learnings/MicroDodgeCalculator.cs` and the tracker examples in `learnings/ProjectileTracker.cs`, `learnings/EnemyTracker.cs`, and `learnings/WorldObjectTracker.cs`. The goal is a small first version that dodges projectiles, avoids obstacles and enemy bodies, gives strong debug visibility, and remains scalable without inheriting the current XDodge/DangerPlanner complexity.
+This design introduces a new selectable dodge mode named `ZDodge`, inspired by `learnings/MicroDodgeCalculator.cs` and the tracker examples in `learnings/ProjectileTracker.cs`, `learnings/EnemyTracker.cs`, and `learnings/WorldObjectTracker.cs`. The goal is a small first version that dodges projectiles, avoids obstacles and enemy bodies, gives strong debug visibility, and remains scalable without inheriting the current XDodge/DangerPlanner complexity.
 
 ## Scope
 
@@ -14,7 +14,7 @@ Version 1 creates a new dodge mode beside the existing modes. It does not replac
 
 Included in v1:
 
-- A new isolated engine under `internal/src/features/movement/zaclin_dodge`.
+- A new isolated engine under `internal/src/features/movement/zdodge`.
 - Projectile survival using a MicroDodge-style candidate sampler.
 - Hard blocking for obstacles and enemies.
 - Complete debug visibility for tracked projectiles, projectile paths, tracked enemies, tracked obstacles, sampled candidates, and current movement target.
@@ -31,7 +31,7 @@ Excluded from v1:
 
 ## Architecture
 
-`ZaclinDodge` owns its own state, candidate sampler, sensor snapshots, debug snapshots, settings, and overlay. It must not depend on XDodge or DangerPlanner planning internals.
+`ZDodge` owns its own state, candidate sampler, sensor snapshots, debug snapshots, settings, and overlay. It must not depend on XDodge or DangerPlanner planning internals.
 
 Allowed shared dependencies are small, low-level systems that already represent the safest available source of truth:
 
@@ -43,17 +43,17 @@ Allowed shared dependencies are small, low-level systems that already represent 
 
 Proposed files:
 
-- `ZaclinDodge.h/.cpp`: public mode API, enable/disable, tick, settings, and overlay entry points.
-- `ZaclinDodgeTypes.h`: shared data structs for threats, blockers, candidates, settings, and debug snapshots.
-- `ZaclinDodgeSensors.h/.cpp`: collects projectile, enemy, and obstacle snapshots with isolated pointer handling.
-- `ZaclinDodgePlanner.h/.cpp`: candidate generation, safety checks, scoring, fallback selection, and movement target calculation.
-- `ZaclinDodgeDebug.h/.cpp`: draws tracked objects, projectile paths, candidate state, and chosen target.
+- `ZDodge.h/.cpp`: public mode API, enable/disable, tick, settings, and overlay entry points.
+- `ZDodgeTypes.h`: shared data structs for threats, blockers, candidates, settings, and debug snapshots.
+- `ZDodgeSensors.h/.cpp`: collects projectile, enemy, and obstacle snapshots with isolated pointer handling.
+- `ZDodgePlanner.h/.cpp`: candidate generation, safety checks, scoring, fallback selection, and movement target calculation.
+- `ZDodgeDebug.h/.cpp`: draws tracked objects, projectile paths, candidate state, and chosen target.
 
 Each module has one purpose: gather world state, evaluate safe points, issue movement, or draw debug state.
 
 ## Runtime Behavior
 
-Each game-update tick, `ZaclinDodge::Tick(player, px, py, dt)` runs only when the new mode is enabled.
+Each game-update tick, `ZDodge::Tick(player, px, py, dt)` runs only when the new mode is enabled.
 
 1. Read player state: position, effective movement speed, delta time, HP/defense when available, and WASD state.
 2. Refresh sensor/debug snapshots every tick so the overlay remains current.
@@ -72,7 +72,7 @@ The default feel should be assistive rather than overriding. The engine should n
 
 Projectile data should use the existing C++ projectile tracking first, despite the current dodge implementation not being trustworthy overall. The useful low-level pieces are already wired into spawn hooks and prediction helpers, and reacquiring all projectile state through a brand-new C++ scene scan would add risk to v1.
 
-`ZaclinDodgeSensors` should adapt existing projectile records into a compact threat snapshot:
+`ZDodgeSensors` should adapt existing projectile records into a compact threat snapshot:
 
 - Current position.
 - Predicted path samples over the reaction window.
@@ -80,7 +80,7 @@ Projectile data should use the existing C++ projectile tracking first, despite t
 - Optional damage metadata for threshold filtering.
 - Stable ID or slot identity for debug display.
 
-Enemy and obstacle tracking should be isolated from XDodge/DangerPlanner. The C# examples establish the desired pattern: cache expensive pool/object discovery, refresh cheap per-frame or throttled state, and clear on realm/reconnect. In C++, any pointer chasing must be SEH-guarded and kept inside `ZaclinDodgeSensors`.
+Enemy and obstacle tracking should be isolated from XDodge/DangerPlanner. The C# examples establish the desired pattern: cache expensive pool/object discovery, refresh cheap per-frame or throttled state, and clear on realm/reconnect. In C++, any pointer chasing must be SEH-guarded and kept inside `ZDodgeSensors`.
 
 For v1, enemies are hard blockers. Obstacles are hard blockers. If a blocker source fails for a frame, that source is skipped for that frame and marked in debug state, while projectile safety continues to work.
 
@@ -190,4 +190,4 @@ In-game validation:
 
 - The current C++ dodge implementation should not be copied as a design model. Reuse only narrow low-level helpers where they are safer than rebuilding the data source.
 - Projectile collision math uses the axis-aligned/Chebyshev projectile check already documented by the C++ dodge helpers. The C# reference's circular distance logic is useful for structure, but not copied for hit detection.
-- Enemy and obstacle scanning may need to start with existing world/entity sources if direct C++ pool scanning proves fragile. The `ZaclinDodgeSensors` interface should hide that choice from the planner.
+- Enemy and obstacle scanning may need to start with existing world/entity sources if direct C++ pool scanning proves fragile. The `ZDodgeSensors` interface should hide that choice from the planner.

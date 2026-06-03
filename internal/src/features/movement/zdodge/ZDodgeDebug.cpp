@@ -1,5 +1,5 @@
 #include "pch-il2cpp.h"
-#include "ZaclinDodgeDebug.h"
+#include "ZDodgeDebug.h"
 
 #include "W2S.h"
 
@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace ZaclinDodge::Debug {
+namespace ZDodge::Debug {
 namespace {
 
 constexpr float kDangerNearTiles = 2.f;
@@ -179,4 +179,4 @@ void Render(const DebugSnapshot& snapshot, const Settings& settings, float camX,
         draw->AddText(ImVec2(playerScreen.x + 10.f, playerScreen.y - 18.f), textColor, StatusName(snapshot.status));
 }
 
-} // namespace ZaclinDodge::Debug
+} // namespace ZDodge::Debug

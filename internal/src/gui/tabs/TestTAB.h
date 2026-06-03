@@ -11,7 +11,7 @@ enum class DodgeMode : int {
     Off     = 0,
     XDodge  = 1,  // Spacetime BFS ported from XRebuild/XDriver. Movement via NativeMoveTo.
     Rollout = 2,  // Forward input-simulation + uniform-grid broad-phase (RolloutDodge).
-    ZDodge  = 3,  // Intent-preserving slide-assist dodge (zaclin_dodge).
+    ZDodge  = 3,  // Intent-preserving slide-assist dodge (zdodge).
 };
 
 DodgeMode GetDodgeMode();

@@ -4,7 +4,7 @@
 
 **Goal:** Add a new isolated `Zaclin` dodge mode that assists player movement by sliding unsafe intent around projectiles, enemies, and obstacles while preserving the existing XDodge and Rollout modes.
 
-**Architecture:** The new engine lives under `internal/src/features/movement/zaclin_dodge` and owns its own settings, sensors, planner, runtime API, and debug overlay. It reuses only low-level sources: `ProjectileTracking` for projectile prediction, `AutoAim::EnumerateLiveEnemies` for enemy bodies, `TestTAB::IsWalkPositionBlocked` for obstacle checks, `SteerInput` for player intent, and `DodgeRuntime` for native speed-clamped movement.
+**Architecture:** The new engine lives under `internal/src/features/movement/zdodge` and owns its own settings, sensors, planner, runtime API, and debug overlay. It reuses only low-level sources: `ProjectileTracking` for projectile prediction, `AutoAim::EnumerateLiveEnemies` for enemy bodies, `TestTAB::IsWalkPositionBlocked` for obstacle checks, `SteerInput` for player intent, and `DodgeRuntime` for native speed-clamped movement.
 
 **Tech Stack:** C++20 DLL code with MSVC/PCH, ImGui/W2S debug drawing, existing IPC feature keys, TypeScript plugin settings, Visual Studio `.vcxproj`/`.filters`, Debug x64 MSBuild verification.
 
@@ -12,11 +12,11 @@
 
 ## File Structure
 
-- Create `internal/src/features/movement/zaclin_dodge/ZaclinDodgeTypes.h`: shared constants, settings, sensor structs, planner structs, and debug snapshot structs.
-- Create `internal/src/features/movement/zaclin_dodge/ZaclinDodgePlanner.h/.cpp`: pure-ish planning helpers for candidate generation, projectile safety, blocker rejection, slide-vector calculation, and target selection.
-- Create `internal/src/features/movement/zaclin_dodge/ZaclinDodgeSensors.h/.cpp`: adapts current projectile/enemy/obstacle data into bounded snapshots; all fragile reads stay here.
-- Create `internal/src/features/movement/zaclin_dodge/ZaclinDodgeDebug.h/.cpp`: overlay drawing for projectiles, paths, enemies, obstacles, candidates, intent vector, slide vector, target, and status text.
-- Create `internal/src/features/movement/zaclin_dodge/ZaclinDodge.h/.cpp`: public mode API, settings setters/getters, per-frame tick, render settings, and render overlay entry points.
+- Create `internal/src/features/movement/zdodge/ZDodgeTypes.h`: shared constants, settings, sensor structs, planner structs, and debug snapshot structs.
+- Create `internal/src/features/movement/zdodge/ZDodgePlanner.h/.cpp`: pure-ish planning helpers for candidate generation, projectile safety, blocker rejection, slide-vector calculation, and target selection.
+- Create `internal/src/features/movement/zdodge/ZDodgeSensors.h/.cpp`: adapts current projectile/enemy/obstacle data into bounded snapshots; all fragile reads stay here.
+- Create `internal/src/features/movement/zdodge/ZDodgeDebug.h/.cpp`: overlay drawing for projectiles, paths, enemies, obstacles, candidates, intent vector, slide vector, target, and status text.
+- Create `internal/src/features/movement/zdodge/ZDodge.h/.cpp`: public mode API, settings setters/getters, per-frame tick, render settings, and render overlay entry points.
 - Modify `internal/src/gui/tabs/TestTAB.h/.cpp`: add `DodgeMode::Zaclin`, switch mode enablement, render settings, and overlay call.
 - Modify `internal/src/features/control/FeatureState.cpp`: clamp `autoDodgeMode` to include `Zaclin`.
 - Modify `internal/src/features/control/FeatureCommandRegistry.cpp`: add `zaclin*` IPC feature handlers.
@@ -28,20 +28,20 @@
 ### Task 1: Scaffold Zaclin Types And Pure Planner Core
 
 **Files:**
-- Create: `internal/src/features/movement/zaclin_dodge/ZaclinDodgeTypes.h`
-- Create: `internal/src/features/movement/zaclin_dodge/ZaclinDodgePlanner.h`
-- Create: `internal/src/features/movement/zaclin_dodge/ZaclinDodgePlanner.cpp`
+- Create: `internal/src/features/movement/zdodge/ZDodgeTypes.h`
+- Create: `internal/src/features/movement/zdodge/ZDodgePlanner.h`
+- Create: `internal/src/features/movement/zdodge/ZDodgePlanner.cpp`
 
 - [ ] **Step 1: Create shared types**
 
-Add `ZaclinDodgeTypes.h` with bounded arrays and explicit status values:
+Add `ZDodgeTypes.h` with bounded arrays and explicit status values:
 
 ```cpp
 #pragma once
 
 #include <cstdint>
 
-namespace ZaclinDodge {
+namespace ZDodge {
 
 constexpr int kCandidateDirections = 32;
 constexpr int kRingPasses = 5;
@@ -148,40 +148,40 @@ struct PlanResult {
     int candidateCount = 0;
 };
 
-} // namespace ZaclinDodge
+} // namespace ZDodge
 ```
 
 - [ ] **Step 2: Add planner interface**
 
-Create `ZaclinDodgePlanner.h`:
+Create `ZDodgePlanner.h`:
 
 ```cpp
 #pragma once
 
-#include "ZaclinDodgeTypes.h"
+#include "ZDodgeTypes.h"
 
-namespace ZaclinDodge::Planner {
+namespace ZDodge::Planner {
 
 PlanResult Evaluate(const PlanRequest& req);
 bool IsPointSafe(const Vec2& point, const Settings& settings, const SensorSnapshot& sensors);
 bool IsSweepSafe(const Vec2& from, const Vec2& to, const Settings& settings, const SensorSnapshot& sensors);
 Vec2 ComputeSlideDirection(const Vec2& desiredDir, const Vec2& player, const Settings& settings, const SensorSnapshot& sensors);
 
-} // namespace ZaclinDodge::Planner
+} // namespace ZDodge::Planner
 ```
 
 - [ ] **Step 3: Implement planner math**
 
-Create `ZaclinDodgePlanner.cpp` with PCH first and these helpers:
+Create `ZDodgePlanner.cpp` with PCH first and these helpers:
 
 ```cpp
 #include "pch-il2cpp.h"
-#include "ZaclinDodgePlanner.h"
+#include "ZDodgePlanner.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace ZaclinDodge::Planner {
+namespace ZDodge::Planner {
 namespace {
 
 float Dot(Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; }
@@ -360,7 +360,7 @@ PlanResult Evaluate(const PlanRequest& req)
     return out;
 }
 
-} // namespace ZaclinDodge::Planner
+} // namespace ZDodge::Planner
 ```
 
 - [ ] **Step 4: Build planner files only through full project**
@@ -376,7 +376,7 @@ Expected before project entries are added: the new files are not compiled yet. I
 - [ ] **Step 5: Commit planner scaffold**
 
 ```powershell
-git add internal/src/features/movement/zaclin_dodge/ZaclinDodgeTypes.h internal/src/features/movement/zaclin_dodge/ZaclinDodgePlanner.h internal/src/features/movement/zaclin_dodge/ZaclinDodgePlanner.cpp
+git add internal/src/features/movement/zdodge/ZDodgeTypes.h internal/src/features/movement/zdodge/ZDodgePlanner.h internal/src/features/movement/zdodge/ZDodgePlanner.cpp
 git commit -m "feat: scaffold zaclin dodge planner"
 ```
 
@@ -385,32 +385,32 @@ git commit -m "feat: scaffold zaclin dodge planner"
 ### Task 2: Add Sensor Snapshot Adapter
 
 **Files:**
-- Create: `internal/src/features/movement/zaclin_dodge/ZaclinDodgeSensors.h`
-- Create: `internal/src/features/movement/zaclin_dodge/ZaclinDodgeSensors.cpp`
+- Create: `internal/src/features/movement/zdodge/ZDodgeSensors.h`
+- Create: `internal/src/features/movement/zdodge/ZDodgeSensors.cpp`
 
 - [ ] **Step 1: Add sensor interface**
 
-Create `ZaclinDodgeSensors.h`:
+Create `ZDodgeSensors.h`:
 
 ```cpp
 #pragma once
 
-#include "ZaclinDodgeTypes.h"
+#include "ZDodgeTypes.h"
 
-namespace ZaclinDodge::Sensors {
+namespace ZDodge::Sensors {
 
 SensorSnapshot Build(float playerX, float playerY, const Settings& settings);
 
-} // namespace ZaclinDodge::Sensors
+} // namespace ZDodge::Sensors
 ```
 
 - [ ] **Step 2: Implement projectile, enemy, and obstacle snapshotting**
 
-Create `ZaclinDodgeSensors.cpp`:
+Create `ZDodgeSensors.cpp`:
 
 ```cpp
 #include "pch-il2cpp.h"
-#include "ZaclinDodgeSensors.h"
+#include "ZDodgeSensors.h"
 
 #include "AutoAim.h"
 #include "ProjectileTracking.h"
@@ -422,7 +422,7 @@ Create `ZaclinDodgeSensors.cpp`:
 #include <vector>
 #include <windows.h>
 
-namespace ZaclinDodge::Sensors {
+namespace ZDodge::Sensors {
 namespace {
 
 constexpr float kThreatCullTiles = 14.f;
@@ -518,7 +518,7 @@ SensorSnapshot Build(float playerX, float playerY, const Settings& settings)
     return out;
 }
 
-} // namespace ZaclinDodge::Sensors
+} // namespace ZDodge::Sensors
 ```
 
 - [ ] **Step 3: Verify symbols used by sensors**
@@ -534,7 +534,7 @@ Expected: `WorldProjectile` exposes `ptr`, `x`, `y`, `damage`, `spawnTick`, `lif
 - [ ] **Step 4: Commit sensors**
 
 ```powershell
-git add internal/src/features/movement/zaclin_dodge/ZaclinDodgeSensors.h internal/src/features/movement/zaclin_dodge/ZaclinDodgeSensors.cpp
+git add internal/src/features/movement/zdodge/ZDodgeSensors.h internal/src/features/movement/zdodge/ZDodgeSensors.cpp
 git commit -m "feat: add zaclin dodge sensors"
 ```
 
@@ -543,17 +543,17 @@ git commit -m "feat: add zaclin dodge sensors"
 ### Task 3: Add Runtime API And Tick Loop
 
 **Files:**
-- Create: `internal/src/features/movement/zaclin_dodge/ZaclinDodge.h`
-- Create: `internal/src/features/movement/zaclin_dodge/ZaclinDodge.cpp`
+- Create: `internal/src/features/movement/zdodge/ZDodge.h`
+- Create: `internal/src/features/movement/zdodge/ZDodge.cpp`
 
 - [ ] **Step 1: Add public API**
 
-Create `ZaclinDodge.h`:
+Create `ZDodge.h`:
 
 ```cpp
 #pragma once
 
-namespace ZaclinDodge {
+namespace ZDodge {
 
 void SetEnabled(bool enabled);
 bool IsEnabled();
@@ -577,20 +577,20 @@ bool GetDebugOverlay();
 void SetCandidateOverlay(bool enabled);
 bool GetCandidateOverlay();
 
-} // namespace ZaclinDodge
+} // namespace ZDodge
 ```
 
 - [ ] **Step 2: Implement runtime using sensors/planner/movement**
 
-Create `ZaclinDodge.cpp`:
+Create `ZDodge.cpp`:
 
 ```cpp
 #include "pch-il2cpp.h"
-#include "ZaclinDodge.h"
+#include "ZDodge.h"
 
-#include "ZaclinDodgeDebug.h"
-#include "ZaclinDodgePlanner.h"
-#include "ZaclinDodgeSensors.h"
+#include "ZDodgeDebug.h"
+#include "ZDodgePlanner.h"
+#include "ZDodgeSensors.h"
 
 #include "MovementRuntime.h"
 #include "SteerInput.h"
@@ -601,7 +601,7 @@ Create `ZaclinDodge.cpp`:
 #include <atomic>
 #include <cmath>
 
-namespace ZaclinDodge {
+namespace ZDodge {
 namespace {
 
 std::atomic<bool> g_enabled{ false };
@@ -719,13 +719,13 @@ bool GetDebugOverlay() { return g_debugOverlay.load(std::memory_order_relaxed); 
 void SetCandidateOverlay(bool enabled) { g_candidateOverlay.store(enabled, std::memory_order_relaxed); }
 bool GetCandidateOverlay() { return g_candidateOverlay.load(std::memory_order_relaxed); }
 
-} // namespace ZaclinDodge
+} // namespace ZDodge
 ```
 
 - [ ] **Step 3: Commit runtime API**
 
 ```powershell
-git add internal/src/features/movement/zaclin_dodge/ZaclinDodge.h internal/src/features/movement/zaclin_dodge/ZaclinDodge.cpp
+git add internal/src/features/movement/zdodge/ZDodge.h internal/src/features/movement/zdodge/ZDodge.cpp
 git commit -m "feat: add zaclin dodge runtime"
 ```
 
@@ -734,39 +734,39 @@ git commit -m "feat: add zaclin dodge runtime"
 ### Task 4: Add Debug Overlay Renderer
 
 **Files:**
-- Create: `internal/src/features/movement/zaclin_dodge/ZaclinDodgeDebug.h`
-- Create: `internal/src/features/movement/zaclin_dodge/ZaclinDodgeDebug.cpp`
+- Create: `internal/src/features/movement/zdodge/ZDodgeDebug.h`
+- Create: `internal/src/features/movement/zdodge/ZDodgeDebug.cpp`
 
 - [ ] **Step 1: Add debug interface**
 
-Create `ZaclinDodgeDebug.h`:
+Create `ZDodgeDebug.h`:
 
 ```cpp
 #pragma once
 
-#include "ZaclinDodgeTypes.h"
+#include "ZDodgeTypes.h"
 
-namespace ZaclinDodge::Debug {
+namespace ZDodge::Debug {
 
 void Render(const DebugSnapshot& snapshot, const Settings& settings, float camX, float camY, float angle, float zoom, float cx, float cy);
 
-} // namespace ZaclinDodge::Debug
+} // namespace ZDodge::Debug
 ```
 
 - [ ] **Step 2: Implement overlay drawing**
 
-Create `ZaclinDodgeDebug.cpp`:
+Create `ZDodgeDebug.cpp`:
 
 ```cpp
 #include "pch-il2cpp.h"
-#include "ZaclinDodgeDebug.h"
+#include "ZDodgeDebug.h"
 
 #include "W2S.h"
 
 #include <imgui/imgui.h>
 #include <algorithm>
 
-namespace ZaclinDodge::Debug {
+namespace ZDodge::Debug {
 namespace {
 
 bool ToScreen(Vec2 p, float camX, float camY, float angle, float zoom, float cx, float cy, ImVec2& out)
@@ -834,7 +834,7 @@ void Render(const DebugSnapshot& snapshot, const Settings& settings, float camX,
     if (snapshot.hasSelectedTarget) DrawCircle(draw, snapshot.selectedTarget, 7.f, targetColor, camX, camY, angle, zoom, cx, cy);
 }
 
-} // namespace ZaclinDodge::Debug
+} // namespace ZDodge::Debug
 ```
 
 - [ ] **Step 3: Verify W2S signature**
@@ -850,7 +850,7 @@ Expected: `internal/src/game/math/W2S.h` exposes the global inline `W2S(...)` he
 - [ ] **Step 4: Commit debug overlay**
 
 ```powershell
-git add internal/src/features/movement/zaclin_dodge/ZaclinDodgeDebug.h internal/src/features/movement/zaclin_dodge/ZaclinDodgeDebug.cpp
+git add internal/src/features/movement/zdodge/ZDodgeDebug.h internal/src/features/movement/zdodge/ZDodgeDebug.cpp
 git commit -m "feat: add zaclin dodge debug overlay"
 ```
 
@@ -874,16 +874,16 @@ enum class DodgeMode : int {
     Off     = 0,
     XDodge  = 1,  // Spacetime BFS ported from XRebuild/XDriver. Movement via NativeMoveTo.
     Rollout = 2,  // Forward input-simulation + uniform-grid broad-phase (RolloutDodge).
-    Zaclin  = 3,  // Intent-preserving slide-assist dodge (zaclin_dodge).
+    Zaclin  = 3,  // Intent-preserving slide-assist dodge (zdodge).
 };
 ```
 
-- [ ] **Step 2: Include ZaclinDodge in TestTAB.cpp**
+- [ ] **Step 2: Include ZDodge in TestTAB.cpp**
 
 Near existing dodge includes, add:
 
 ```cpp
-#include "ZaclinDodge.h"
+#include "ZDodge.h"
 ```
 
 - [ ] **Step 3: Update ApplyDodgeModeWithEnter**
@@ -893,7 +893,7 @@ In `TestTAB.cpp`, update the mode body to include Zaclin and install the existin
 ```cpp
     XDodge::SetEnabled(nextMode == DodgeMode::XDodge);
     RolloutDodge::SetEnabled(nextMode == DodgeMode::Rollout);
-    ZaclinDodge::SetEnabled(nextMode == DodgeMode::Zaclin);
+    ZDodge::SetEnabled(nextMode == DodgeMode::Zaclin);
     if (nextMode == DodgeMode::XDodge) {
         XDodge::OnEnter();
         DangerPlanner::TryInstall();
@@ -901,7 +901,7 @@ In `TestTAB.cpp`, update the mode body to include Zaclin and install the existin
         RolloutDodge::OnEnter();
         DangerPlanner::TryInstall();
     } else if (nextMode == DodgeMode::Zaclin) {
-        ZaclinDodge::OnEnter();
+        ZDodge::OnEnter();
         DangerPlanner::TryInstall();
     }
 ```
@@ -925,7 +925,7 @@ and:
         RolloutDodge::RenderSettings();
     } else if (g_dodgeMode == DodgeMode::Zaclin) {
         ImGui::Spacing();
-        ZaclinDodge::RenderSettings();
+        ZDodge::RenderSettings();
     }
 ```
 
@@ -934,17 +934,17 @@ and:
 Where `XDodge::RenderDebugPath` and `RolloutDodge::RenderDebugPath` are called in `TestTAB::Tick`, add:
 
 ```cpp
-            ZaclinDodge::RenderDebugOverlay(camX, camY, angleRad, zoom, cx, cy);
+            ZDodge::RenderDebugOverlay(camX, camY, angleRad, zoom, cx, cy);
 ```
 
 - [ ] **Step 6: Update AppEngine tick dispatch**
 
-In `DangerPlanner.cpp`, include `ZaclinDodge.h` and update the dispatch near `RolloutDodge::Tick` / `XDodge::Tick`:
+In `DangerPlanner.cpp`, include `ZDodge.h` and update the dispatch near `RolloutDodge::Tick` / `XDodge::Tick`:
 
 ```cpp
         const bool rolloutOn = RolloutDodge::IsEnabled();
-        const bool zaclinOn = ZaclinDodge::IsEnabled();
-        if (zaclinOn)      ZaclinDodge::Tick(p, px, py, dt);
+        const bool zaclinOn = ZDodge::IsEnabled();
+        if (zaclinOn)      ZDodge::Tick(p, px, py, dt);
         else if (rolloutOn) RolloutDodge::Tick(p, px, py, dt);
         else               XDodge::Tick(p, px, py, dt);
 ```
@@ -959,19 +959,19 @@ void    SetAutoDodgeMode(int mode)    { s_featDodgeMode.store(ClampInt(mode, 0, 
 
 - [ ] **Step 8: Add IPC feature handlers**
 
-In `FeatureCommandRegistry.cpp`, include `ZaclinDodge.h` and add a new function before `ApplyRolloutFeature`:
+In `FeatureCommandRegistry.cpp`, include `ZDodge.h` and add a new function before `ApplyRolloutFeature`:
 
 ```cpp
     bool ApplyZaclinFeature(const FeatureCommand& f)
     {
         static const FeatureHandler h[] = {
-            FH_FLOAT("zaclinReactWindowMs", ZaclinDodge::SetReactWindowMs),
-            FH_FLOAT("zaclinMaxMoveTiles", ZaclinDodge::SetMaxMoveTiles),
-            FH_FLOAT("zaclinPlayerRadius", ZaclinDodge::SetPlayerRadius),
-            FH_FLOAT("zaclinProjectileRadiusFallback", ZaclinDodge::SetProjectileRadiusFallback),
-            FH_FLOAT("zaclinDamageThresholdPct", ZaclinDodge::SetDamageThresholdPct),
-            FH_INT_BOOL("zaclinDebugOverlay", ZaclinDodge::SetDebugOverlay),
-            FH_INT_BOOL("zaclinCandidateOverlay", ZaclinDodge::SetCandidateOverlay)
+            FH_FLOAT("zaclinReactWindowMs", ZDodge::SetReactWindowMs),
+            FH_FLOAT("zaclinMaxMoveTiles", ZDodge::SetMaxMoveTiles),
+            FH_FLOAT("zaclinPlayerRadius", ZDodge::SetPlayerRadius),
+            FH_FLOAT("zaclinProjectileRadiusFallback", ZDodge::SetProjectileRadiusFallback),
+            FH_FLOAT("zaclinDamageThresholdPct", ZDodge::SetDamageThresholdPct),
+            FH_INT_BOOL("zaclinDebugOverlay", ZDodge::SetDebugOverlay),
+            FH_INT_BOOL("zaclinCandidateOverlay", ZDodge::SetCandidateOverlay)
         };
         return ApplyFeatureTable(f, h, sizeof(h) / sizeof(h[0]));
     }
@@ -1092,10 +1092,10 @@ git commit -m "feat: add zaclin dodge plugin settings"
 In `internal/il2cpp-dll-injection.vcxproj`, add these near the existing movement dodge source entries:
 
 ```xml
-    <ClCompile Include="src\features\movement\zaclin_dodge\ZaclinDodge.cpp" />
-    <ClCompile Include="src\features\movement\zaclin_dodge\ZaclinDodgePlanner.cpp" />
-    <ClCompile Include="src\features\movement\zaclin_dodge\ZaclinDodgeSensors.cpp" />
-    <ClCompile Include="src\features\movement\zaclin_dodge\ZaclinDodgeDebug.cpp" />
+    <ClCompile Include="src\features\movement\zdodge\ZDodge.cpp" />
+    <ClCompile Include="src\features\movement\zdodge\ZDodgePlanner.cpp" />
+    <ClCompile Include="src\features\movement\zdodge\ZDodgeSensors.cpp" />
+    <ClCompile Include="src\features\movement\zdodge\ZDodgeDebug.cpp" />
 ```
 
 - [ ] **Step 2: Add ClInclude entries**
@@ -1103,11 +1103,11 @@ In `internal/il2cpp-dll-injection.vcxproj`, add these near the existing movement
 Add these near existing movement dodge headers:
 
 ```xml
-    <ClInclude Include="src\features\movement\zaclin_dodge\ZaclinDodge.h" />
-    <ClInclude Include="src\features\movement\zaclin_dodge\ZaclinDodgeTypes.h" />
-    <ClInclude Include="src\features\movement\zaclin_dodge\ZaclinDodgePlanner.h" />
-    <ClInclude Include="src\features\movement\zaclin_dodge\ZaclinDodgeSensors.h" />
-    <ClInclude Include="src\features\movement\zaclin_dodge\ZaclinDodgeDebug.h" />
+    <ClInclude Include="src\features\movement\zdodge\ZDodge.h" />
+    <ClInclude Include="src\features\movement\zdodge\ZDodgeTypes.h" />
+    <ClInclude Include="src\features\movement\zdodge\ZDodgePlanner.h" />
+    <ClInclude Include="src\features\movement\zdodge\ZDodgeSensors.h" />
+    <ClInclude Include="src\features\movement\zdodge\ZDodgeDebug.h" />
 ```
 
 - [ ] **Step 3: Add include directory**
@@ -1115,7 +1115,7 @@ Add these near existing movement dodge headers:
 In each `AdditionalIncludeDirectories` property, add:
 
 ```xml
-$(ProjectDir)src\features\movement\zaclin_dodge;
+$(ProjectDir)src\features\movement\zdodge;
 ```
 
 beside the existing `$(ProjectDir)src\features\movement\dodge;` entry.

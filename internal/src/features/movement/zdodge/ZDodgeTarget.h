@@ -3,7 +3,7 @@
 
 struct ImDrawList;
 
-namespace ZaclinDodge::Target {
+namespace ZDodge::Target {
 
 // Maximum screen-space distance (pixels) from the click to an enemy's projected
 // centre for that enemy to be considered a valid pick target.
@@ -32,4 +32,4 @@ void Render(ImDrawList* draw,
             float camX, float camY, float angle, float zoom,
             float cx,   float cy);
 
-} // namespace ZaclinDodge::Target
+} // namespace ZDodge::Target

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "ZaclinDodgeTypes.h"
+#include "ZDodgeTypes.h"
 
 #include "gui/tabs/WorldTAB.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace ZaclinDodge::Sensors {
+namespace ZDodge::Sensors {
 
 namespace Detail {
 
@@ -214,4 +214,4 @@ inline void AddAoeThreats(SensorSnapshot& out, const WorldAoe* aoes, int aoeCoun
 	}
 }
 
-} // namespace ZaclinDodge::Sensors
+} // namespace ZDodge::Sensors

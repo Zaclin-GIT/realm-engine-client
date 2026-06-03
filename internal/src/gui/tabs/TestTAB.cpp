@@ -4,8 +4,8 @@
 #include "ProjectileCatalog.h"
 #include "XDodge.h"
 #include "RolloutDodge.h"
-#include "ZaclinDodge.h"
-#include "ZaclinDodgeTarget.h"
+#include "ZDodge.h"
+#include "ZDodgeTarget.h"
 #include <windows.h>
 
 using TestTAB::DodgeMode;
@@ -129,7 +129,7 @@ void ApplyDodgeModeWithEnter(DodgeMode nextMode)
     // enabled at a time (mutual exclusivity enforced here).
     XDodge::SetEnabled(nextMode == DodgeMode::XDodge);
     RolloutDodge::SetEnabled(nextMode == DodgeMode::Rollout);
-    ZaclinDodge::SetEnabled(nextMode == DodgeMode::ZDodge);
+    ZDodge::SetEnabled(nextMode == DodgeMode::ZDodge);
     if (nextMode == DodgeMode::XDodge) {
         XDodge::OnEnter();
         // Install the AppEngineManager::Update detour that drives the dodge Tick.
@@ -144,7 +144,7 @@ void ApplyDodgeModeWithEnter(DodgeMode nextMode)
         RolloutDodge::OnEnter();
         DangerPlanner::TryInstall();
     } else if (nextMode == DodgeMode::ZDodge) {
-        ZaclinDodge::OnEnter();
+        ZDodge::OnEnter();
         DangerPlanner::TryInstall();
     }
 
@@ -623,8 +623,8 @@ void TestTAB::Tick(bool menuVisible)
         if (g_w2sValid) {
             XDodge::RenderDebugPath(camX, camY, angleRad, zoom, cx, cy);
             RolloutDodge::RenderDebugPath(camX, camY, angleRad, zoom, cx, cy);
-            ZaclinDodge::RenderDebugOverlay(camX, camY, angleRad, zoom, cx, cy);
-            ZaclinDodge::Target::Render(dl, camX, camY, angleRad, zoom, cx, cy);
+            ZDodge::RenderDebugOverlay(camX, camY, angleRad, zoom, cx, cy);
+            ZDodge::Target::Render(dl, camX, camY, angleRad, zoom, cx, cy);
         }
 
         // Locked enemy visualization — red reticle + two rings:
@@ -881,8 +881,8 @@ void TestTAB::Tick(bool menuVisible)
             }
         }
 
-        // ── MMB: ZaclinDodge target lock ─────────────────────────────────────
-        // Middle-click near an enemy to lock it as the ZaclinDodge range-keeping
+        // ── MMB: ZDodge target lock ─────────────────────────────────────
+        // Middle-click near an enemy to lock it as the ZDodge range-keeping
         // target. Click the same enemy again to release (toggle). Picks by screen
         // distance so the click maps exactly to what the player sees on screen.
         {
@@ -891,7 +891,7 @@ void TestTAB::Tick(bool menuVisible)
             const bool mmbEdge = mmbDown && !s_prevMmb;
             s_prevMmb = mmbDown;
             if (mmbEdge && g_w2sValid && !menuVisible && !ImGui::GetIO().WantCaptureMouse)
-                ZaclinDodge::Target::ProcessClick(g_mouseSX, g_mouseSY,
+                ZDodge::Target::ProcessClick(g_mouseSX, g_mouseSY,
                                                   camX, camY, angleRad, zoom, cx, cy);
         }
 
@@ -952,7 +952,7 @@ void TestTAB::RenderMovementSection()
         RolloutDodge::RenderSettings();
     } else if (g_dodgeMode == DodgeMode::ZDodge) {
         ImGui::Spacing();
-        ZaclinDodge::RenderSettings();
+        ZDodge::RenderSettings();
     }
 
     ImGui::Unindent(8.f);

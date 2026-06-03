@@ -1,5 +1,5 @@
 #include "pch-il2cpp.h"
-#include "ZaclinDodgeTarget.h"
+#include "ZDodgeTarget.h"
 
 #include "gui/tabs/WorldTAB.h"
 #include "W2S.h"
@@ -8,7 +8,7 @@
 #include <atomic>
 #include <cmath>
 
-namespace ZaclinDodge::Target {
+namespace ZDodge::Target {
 namespace {
 
 std::atomic<int32_t> g_targetId{ 0 };   // 0 = no target
@@ -113,4 +113,4 @@ void Render(ImDrawList* draw,
     draw->AddCircleFilled(ImVec2(sx, sy), 3.f, IM_COL32(255, 255, 255, 230));
 }
 
-} // namespace ZaclinDodge::Target
+} // namespace ZDodge::Target

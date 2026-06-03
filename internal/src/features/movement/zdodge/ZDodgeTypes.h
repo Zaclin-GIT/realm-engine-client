@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace ZaclinDodge {
+namespace ZDodge {
 
 constexpr int kCandidateDirections = 24;
 constexpr int kRingPasses = 5;
@@ -123,4 +123,4 @@ struct PlanResult {
     int candidateCount = 0;
 };
 
-} // namespace ZaclinDodge
+} // namespace ZDodge
