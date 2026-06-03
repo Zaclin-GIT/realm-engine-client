@@ -121,6 +121,16 @@ function resolveInternalVersionDllPath(pathOrDir: string): string | null {
   return null;
 }
 
+function resolveDefaultDevInternalDll(): string | null {
+  const candidates = [
+    resolve(APP_ROOT, '..', 'internal', 'x64', 'Debug', 'version.dll'),
+    resolve(APP_ROOT, '..', 'internal', 'x64', 'Release', 'version.dll'),
+    resolve(APP_ROOT, '..', 'DebugInternal', 'x64', 'Debug', 'version.dll'),
+    resolve(APP_ROOT, '..', 'DebugInternal', 'x64', 'Release', 'version.dll'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
 function loadClientDataConfig(): ClientDataConfig {
   const empty: ClientDataConfig = {
     rotmgPath: null,
@@ -192,7 +202,7 @@ async function main() {
     | 'skipped_env'
     | 'none'
     | 'error' = 'none';
-  /** Set when both internal.bin and DebugInternal\\x64\\Release\\version.dll exist; logged for deploy diagnostics. */
+  /** Set when both internal.bin and a local dev version.dll exist; logged for deploy diagnostics. */
   let internalBinMtimeMs: number | null = null;
   let devDllMtimeMs: number | null = null;
   if (hooker.gameDirectory) {
@@ -210,7 +220,7 @@ async function main() {
       const binPath = resolve(assetsDir, 'internal.bin');
       // APP_ROOT = bot-client dir (Electron sets REALM_ENGINE_APP_ROOT). ROOT may be resourcesPath in prod,
       // so never use ROOT/.. for repo siblings — that misses LFG/DebugInternal next to LFG/bot-client.
-      const devDll = resolve(APP_ROOT, '..', 'DebugInternal', 'x64', 'Release', 'version.dll');
+      const devDll = resolveDefaultDevInternalDll();
 
       const envDllResolved = resolveInternalVersionDllPath(
         String(process.env.REALM_ENGINE_INTERNAL_VERSION_DLL || ''),
@@ -241,7 +251,7 @@ async function main() {
 
       // If a local DebugInternal build is newer than the shipped encrypted blob, prefer it.
       // Stale internal.bin often mismatches the live Exalt client and crashes inside IL2CPP/hooks.
-      if (existsSync(binPath) && existsSync(devDll)) {
+      if (devDll && existsSync(binPath)) {
         try {
           internalBinMtimeMs = statSync(binPath).mtimeMs;
           devDllMtimeMs = statSync(devDll).mtimeMs;
@@ -264,7 +274,7 @@ async function main() {
         } catch {}
       }
       // Dev fallback: copy raw DLL from DebugInternal build output
-      if (!deployed && existsSync(devDll)) {
+      if (!deployed && devDll) {
         try {
           copyFileSync(devDll, cheatDllDest);
           deployed = true;
@@ -274,7 +284,7 @@ async function main() {
       if (deployed) {
         Logger.log('Main', `Internal DLL deployed to ${cheatDllDest}`);
       } else {
-        Logger.warn('Main', 'Internal DLL not found (no assets/internal.bin and no DebugInternal build). DLL features unavailable.');
+        Logger.warn('Main', 'Internal DLL not found (no assets/internal.bin and no local internal build). DLL features unavailable.');
       }
     } catch (err) {
       versionDeploySource = 'error';
@@ -303,7 +313,7 @@ async function main() {
       } catch {
         wSz = null;
       }
-      const logDevDll = resolve(APP_ROOT, '..', 'DebugInternal', 'x64', 'Release', 'version.dll');
+      const logDevDll = resolveDefaultDevInternalDll();
       const logBinPath = resolve(assetsDir, 'internal.bin');
       let binMtimeProbe: number | null = null;
       let devMtimeProbe: number | null = null;
@@ -313,7 +323,7 @@ async function main() {
         binMtimeProbe = null;
       }
       try {
-        if (existsSync(logDevDll)) devMtimeProbe = statSync(logDevDll).mtimeMs;
+        if (logDevDll && existsSync(logDevDll)) devMtimeProbe = statSync(logDevDll).mtimeMs;
       } catch {
         devMtimeProbe = null;
       }

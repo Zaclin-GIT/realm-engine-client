@@ -168,6 +168,15 @@ static std::atomic<int>   s_featPlayerNoclipHotkeyVk{'N'};
 static std::atomic<int>   s_pendingPlayerNoclipEnabled{-1};
 static std::atomic<int>   s_featSocketHotkeyActive{0};
 static std::atomic<int>   s_featSocketHotkeyVk{'L'};
+struct PluginToggleHotkeyBinding {
+    char pluginId[96];
+    int mainVk;
+    bool requireShift;
+    bool requireCtrl;
+    bool requireAlt;
+    bool lastDown;
+};
+static std::vector<PluginToggleHotkeyBinding> s_pluginToggleHotkeys;
 static std::atomic<int>   s_featWalkTargetActive{0};
 static std::atomic<float> s_featWalkTargetX{0.f};
 static std::atomic<float> s_featWalkTargetY{0.f};
@@ -341,6 +350,53 @@ int ResolveHotkeyVk(const char* raw)
     return 0;
 }
 
+bool ParsePluginToggleHotkey(const char* raw, PluginToggleHotkeyBinding& binding)
+{
+    if (!raw) return false;
+
+    std::string input(raw);
+    size_t start = 0;
+    int mainVk = 0;
+    bool requireShift = false;
+    bool requireCtrl = false;
+    bool requireAlt = false;
+
+    while (start <= input.size()) {
+        const size_t end = input.find('+', start);
+        std::string part = input.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        std::string compact;
+        for (const char ch : part) {
+            const unsigned char c = static_cast<unsigned char>(ch);
+            if (!std::isspace(c))
+                compact.push_back(static_cast<char>(std::toupper(c)));
+        }
+
+        if (!compact.empty()) {
+            if (compact == "SHIFT") {
+                requireShift = true;
+            } else if (compact == "CTRL" || compact == "CONTROL") {
+                requireCtrl = true;
+            } else if (compact == "ALT" || compact == "MENU") {
+                requireAlt = true;
+            } else {
+                if (mainVk != 0) return false;
+                mainVk = ResolveHotkeyVk(compact.c_str());
+                if (mainVk == VK_SHIFT || mainVk == VK_CONTROL || mainVk == VK_MENU) return false;
+            }
+        }
+
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+
+    if (mainVk == 0) return false;
+    binding.mainVk = mainVk;
+    binding.requireShift = requireShift;
+    binding.requireCtrl = requireCtrl;
+    binding.requireAlt = requireAlt;
+    return true;
+}
+
 bool IsCurrentProcessForeground()
 {
     HWND hwnd = GetForegroundWindow();
@@ -387,6 +443,93 @@ bool PollSocketHotkeyEvent()
     const bool shouldFire = hotkeyDown && !s_lastHotkeyDown;
     s_lastHotkeyDown = hotkeyDown;
     return shouldFire;
+}
+
+bool IsVkDown(int vk)
+{
+    return ((GetAsyncKeyState(vk) | GetKeyState(vk)) & 0x8000) != 0;
+}
+
+bool IsShiftDown()
+{
+    return IsVkDown(VK_SHIFT) || IsVkDown(VK_LSHIFT) || IsVkDown(VK_RSHIFT);
+}
+
+bool IsCtrlDown()
+{
+    return IsVkDown(VK_CONTROL) || IsVkDown(VK_LCONTROL) || IsVkDown(VK_RCONTROL);
+}
+
+bool IsAltDown()
+{
+    return IsVkDown(VK_MENU) || IsVkDown(VK_LMENU) || IsVkDown(VK_RMENU);
+}
+
+bool IsPluginToggleHotkeyDown(const PluginToggleHotkeyBinding& binding, bool foreground)
+{
+    if (!foreground || binding.mainVk == 0) return false;
+    if (binding.requireShift && !IsShiftDown()) return false;
+    if (binding.requireCtrl && !IsCtrlDown()) return false;
+    if (binding.requireAlt && !IsAltDown()) return false;
+    return IsVkDown(binding.mainVk);
+}
+
+bool IsPluginHotkeyIdSafe(const char* s)
+{
+    if (!s || !*s) return false;
+    size_t len = strlen(s);
+    if (len >= 96) return false;
+    for (size_t i = 0; i < len; ++i) {
+        const char c = s[i];
+        const bool ok =
+            (c >= 'a' && c <= 'z') ||
+            (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+void ApplyPluginToggleHotkeys(const char* spec)
+{
+    s_pluginToggleHotkeys.clear();
+    if (!spec || !*spec) return;
+
+    std::string input(spec);
+    size_t start = 0;
+    while (start < input.size()) {
+        const size_t end = input.find(';', start);
+        const std::string token = input.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        const size_t eq = token.find('=');
+        if (eq != std::string::npos) {
+            const std::string pluginId = token.substr(0, eq);
+            const std::string hotkey = token.substr(eq + 1);
+            if (IsPluginHotkeyIdSafe(pluginId.c_str())) {
+                PluginToggleHotkeyBinding binding{};
+                if (ParsePluginToggleHotkey(hotkey.c_str(), binding)) {
+                    strncpy_s(binding.pluginId, sizeof(binding.pluginId), pluginId.c_str(), _TRUNCATE);
+                    binding.lastDown = IsPluginToggleHotkeyDown(binding, IsCurrentProcessForeground());
+                    s_pluginToggleHotkeys.push_back(binding);
+                }
+            }
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+}
+
+void CollectPluginToggleHotkeyEvents(std::vector<std::string>& outPluginIds)
+{
+    if (s_pluginToggleHotkeys.empty()) return;
+    const bool foreground = IsCurrentProcessForeground();
+    for (auto& binding : s_pluginToggleHotkeys) {
+        const bool down = IsPluginToggleHotkeyDown(binding, foreground);
+        if (down && !binding.lastDown) {
+            outPluginIds.emplace_back(binding.pluginId);
+        }
+        binding.lastDown = down;
+    }
 }
 
 void ApplyWalkTargetFeatureState()
@@ -1224,7 +1367,7 @@ static void DispatchCommand(char* json)
     {
         char keyBuf[64] = {};
         char valueType[8] = {};
-        char valueNorm[128] = {};
+        char valueNorm[4096] = {};
         if (!JsonGetString(json, "key", keyBuf, sizeof(keyBuf))) return;
         if (!JsonGetString(json, "valueType", valueType, sizeof(valueType))) return;
 
@@ -1239,7 +1382,7 @@ static void DispatchCommand(char* json)
             return;
         }
 
-        char payload[256] = {};
+        char payload[8192] = {};
         snprintf(payload, sizeof(payload), "%s|%s|%s", keyBuf, valueType, valueNorm);
         if (!VerifyClientSeqAndMac(seqStr, macHex, "setFeature", payload)) {
             DBG_FILE_LOG("[IpcBridge] setFeature HMAC REJECTED: key=" << keyBuf << " valueType=" << valueType << " value=" << valueNorm);
@@ -1398,6 +1541,8 @@ static void DispatchCommand(char* json)
             s_featSocketHotkeyActive.store(JsonGetBool(json, "value") ? 1 : 0, std::memory_order_relaxed);
         } else if (strcmp(keyBuf, "socketHotkey") == 0) {
             s_featSocketHotkeyVk.store(ResolveHotkeyVk(valueNorm), std::memory_order_relaxed);
+        } else if (strcmp(keyBuf, "pluginToggleHotkeys") == 0) {
+            ApplyPluginToggleHotkeys(valueNorm);
         } else if (strcmp(keyBuf, "walkTargetX") == 0) {
             s_featWalkTargetX.store(static_cast<float>(atof(valueNorm)), std::memory_order_relaxed);
         } else if (strcmp(keyBuf, "walkTargetY") == 0) {
@@ -1638,6 +1783,24 @@ DWORD WINAPI IpcBridgeThread(LPVOID)
                         break;
                     }
                 }
+
+                std::vector<std::string> pluginToggleEvents;
+                CollectPluginToggleHotkeyEvents(pluginToggleEvents);
+                for (const auto& pluginId : pluginToggleEvents)
+                {
+                    if (!WriteSignedHotkeyEvent(
+                        hPipe,
+                        msgBuf,
+                        sizeof(msgBuf),
+                        pluginId.c_str(),
+                        "togglePlugin",
+                        true))
+                    {
+                        connected = false;
+                        break;
+                    }
+                }
+                if (!connected) break;
 
                 const int noclipEnabled = s_pendingPlayerNoclipEnabled.exchange(-1, std::memory_order_relaxed);
                 if (noclipEnabled >= 0)

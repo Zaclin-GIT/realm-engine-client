@@ -58,6 +58,7 @@ interface LoadedPlugin {
   name: string;
   filePath: string;
   source: PluginSource;
+  hotkey: string;
   context: AnyPluginContext;
   /**
    * Optional teardown returned from a user plugin's `register(ctx)` call.
@@ -72,6 +73,84 @@ const USER_PLUGIN_EXTS = ['.mjs'] as const;
 
 function stripPluginExt(fileName: string): string {
   return fileName.replace(/\.(?:mjs|js|ts)$/i, '');
+}
+
+const HOTKEY_ALIASES = new Map<string, string>([
+  ['ESC', 'Escape'],
+  ['ESCAPE', 'Escape'],
+  ['INS', 'Insert'],
+  ['INSERT', 'Insert'],
+  ['DEL', 'Delete'],
+  ['DELETE', 'Delete'],
+  ['HOME', 'Home'],
+  ['END', 'End'],
+  ['PGUP', 'PageUp'],
+  ['PAGEUP', 'PageUp'],
+  ['PGDN', 'PageDown'],
+  ['PAGEDOWN', 'PageDown'],
+  ['UP', 'Up'],
+  ['ARROWUP', 'Up'],
+  ['DOWN', 'Down'],
+  ['ARROWDOWN', 'Down'],
+  ['LEFT', 'Left'],
+  ['ARROWLEFT', 'Left'],
+  ['RIGHT', 'Right'],
+  ['ARROWRIGHT', 'Right'],
+  ['SPACE', 'Space'],
+  ['SPACEBAR', 'Space'],
+  ['TAB', 'Tab'],
+  ['BACKSPACE', 'Backspace'],
+  ['ENTER', 'Enter'],
+  ['RETURN', 'Enter'],
+]);
+
+const HOTKEY_MODIFIER_ALIASES = new Map<string, string>([
+  ['CTRL', 'Ctrl'],
+  ['CONTROL', 'Ctrl'],
+  ['ALT', 'Alt'],
+  ['MENU', 'Alt'],
+  ['SHIFT', 'Shift'],
+]);
+
+function normalizeHotkeyKey(raw: string): string | null {
+  const compact = raw.replace(/\s+/g, '').toUpperCase();
+  if (!compact) return null;
+  if (/^[A-Z0-9]$/.test(compact)) return compact;
+  const fKey = compact.match(/^F([1-9]|1[0-2])$/);
+  if (fKey) return `F${fKey[1]}`;
+  const numpad = compact.match(/^(?:NUMPAD|NUM)([0-9])$/);
+  if (numpad) return `Numpad${numpad[1]}`;
+  const alias = HOTKEY_ALIASES.get(compact);
+  if (alias) return alias;
+  return null;
+}
+
+function normalizeHotkey(raw: unknown): string | null {
+  const input = String(raw ?? '').trim();
+  if (!input) return '';
+  const parts = input.split('+').map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) return '';
+
+  const modifiers = new Set<string>();
+  let mainKey = '';
+
+  for (const part of parts) {
+    const compact = part.replace(/\s+/g, '').toUpperCase();
+    const modifier = HOTKEY_MODIFIER_ALIASES.get(compact);
+    if (modifier) {
+      modifiers.add(modifier);
+      continue;
+    }
+    if (mainKey) return null;
+    const normalized = normalizeHotkeyKey(part);
+    if (!normalized) return null;
+    mainKey = normalized;
+  }
+
+  if (!mainKey) return null;
+
+  const orderedModifiers = ['Ctrl', 'Alt', 'Shift'].filter((modifier) => modifiers.has(modifier));
+  return [...orderedModifiers, mainKey].join('+');
 }
 
 interface SecurePluginRecord {
@@ -173,7 +252,7 @@ export class PluginManager {
   }
 
   /** Get all loaded plugins (for dashboard). Admin-gated plugins hidden when adminMode is off. */
-  getPlugins(): { id: string; name: string; enabled: boolean; category: PluginCategory; settings: any[]; source: PluginSource; requiredPlan: string | null }[] {
+  getPlugins(): { id: string; name: string; enabled: boolean; category: PluginCategory; settings: any[]; source: PluginSource; requiredPlan: string | null; hotkey: string; hotkeyLocked: boolean }[] {
     return Array.from(this.loadedPlugins.values())
       .filter(p => !this.isAdminGated(p.id) || this.adminMode)
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -185,6 +264,8 @@ export class PluginManager {
         settings: this.getDashboardSettings(p),
         source: p.source,
         requiredPlan: this.getRequiredPlan(p.id),
+        hotkey: p.hotkey,
+        hotkeyLocked: this.isAlwaysEnabled(p.id),
       }));
   }
 
@@ -267,6 +348,49 @@ export class PluginManager {
     // Admin dev: all gate checks removed — every plugin can be toggled freely.
     plugin.context.enabled = enabled;
     return { ok: true };
+  }
+
+  togglePluginByHotkey(pluginId: string): { ok: boolean; enabled?: boolean; reason?: string; requiredPlan?: string } {
+    const plugin = this.loadedPlugins.get(pluginId);
+    if (!plugin) return { ok: false, reason: 'Plugin not found' };
+    if (!plugin.hotkey) return { ok: false, reason: 'Plugin has no hotkey' };
+    if (this.isAlwaysEnabled(pluginId)) return { ok: false, reason: 'Plugin is always enabled' };
+    const nextEnabled = !plugin.context.enabled;
+    const result = this.togglePlugin(pluginId, nextEnabled);
+    return result.ok ? { ...result, enabled: nextEnabled } : result;
+  }
+
+  updatePluginHotkey(pluginId: string, rawHotkey: unknown): { ok: boolean; hotkey?: string; reason?: string; conflictPluginId?: string } {
+    const plugin = this.loadedPlugins.get(pluginId);
+    if (!plugin) return { ok: false, reason: 'Plugin not found' };
+    if (this.isAlwaysEnabled(pluginId)) return { ok: false, reason: 'Plugin is always enabled' };
+
+    const hotkey = normalizeHotkey(rawHotkey);
+    if (hotkey === null) return { ok: false, reason: 'Unsupported hotkey' };
+
+    if (hotkey) {
+      const hotkeyLower = hotkey.toLowerCase();
+      for (const other of this.loadedPlugins.values()) {
+        if (other.id === pluginId) continue;
+        if (other.hotkey && other.hotkey.toLowerCase() === hotkeyLower) {
+          return {
+            ok: false,
+            reason: `Hotkey already assigned to ${other.name || other.id}`,
+            conflictPluginId: other.id,
+          };
+        }
+      }
+    }
+
+    plugin.hotkey = hotkey;
+    Logger.log('PluginManager', `Hotkey for ${plugin.name || plugin.id}: ${hotkey || '(none)'}`);
+    return { ok: true, hotkey };
+  }
+
+  getPluginHotkeyBindings(): Array<{ pluginId: string; hotkey: string }> {
+    return Array.from(this.loadedPlugins.values())
+      .filter((p) => !!p.hotkey && !this.isAlwaysEnabled(p.id))
+      .map((p) => ({ pluginId: p.id, hotkey: p.hotkey }));
   }
 
   /**
@@ -476,6 +600,7 @@ export class PluginManager {
         name: context.name || id,
         filePath,
         source,
+        hotkey: '',
         context,
         userCleanup,
       });
@@ -634,6 +759,7 @@ export class PluginManager {
         name: context.name || id,
         filePath: `remote:${id}`,
         source: 'bundled',
+        hotkey: '',
         context,
         userCleanup: null,
       });
