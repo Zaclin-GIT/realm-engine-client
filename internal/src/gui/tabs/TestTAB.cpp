@@ -6,6 +6,7 @@
 #include "RolloutDodge.h"
 #include "ZDodge.h"
 #include "ZDodgeTarget.h"
+#include "DbgFileLog.h"
 #include <windows.h>
 
 using TestTAB::DodgeMode;
@@ -132,6 +133,12 @@ void ApplyDodgeModeWithEnter(DodgeMode nextMode)
     XDodge::SetEnabled(nextMode == DodgeMode::XDodge);
     RolloutDodge::SetEnabled(rollout);
     ZDodge::SetEnabled(nextMode == DodgeMode::ZDodge);
+
+    DBG_FILE_LOG("[DodgeSwap] ApplyDodgeModeWithEnter nextMode=" << static_cast<int>(nextMode)
+        << " (0=Off 1=XDodge 2=RollGrid 3=RollQuad 4=ZDodge)"
+        << " -> enabled{ XDodge=" << XDodge::IsEnabled()
+        << " Rollout=" << RolloutDodge::IsEnabled()
+        << " ZDodge=" << ZDodge::IsEnabled() << " }");
     if (nextMode == DodgeMode::XDodge) {
         XDodge::OnEnter();
         // Install the AppEngineManager::Update detour that drives the dodge Tick.
@@ -622,14 +629,17 @@ void TestTAB::Tick(bool menuVisible)
             }
         }
 
-        // Planned-path overlay (toggle-gated inside RenderDebugPath):
-        // A* route polyline / BFS committed step, so you can see where the
-        // dodge intends to go.
+        // Planned-path overlay. Each engine's RenderDebugPath only gates on its
+        // own "draw path" toggle, which persists across mode switches — so gate
+        // on the active engine here too, otherwise a disabled engine keeps
+        // drawing its stale viz buffers after you switch modes.
         if (g_w2sValid) {
-            XDodge::RenderDebugPath(camX, camY, angleRad, zoom, cx, cy);
-            RolloutDodge::RenderDebugPath(camX, camY, angleRad, zoom, cx, cy);
-            ZDodge::RenderDebugOverlay(camX, camY, angleRad, zoom, cx, cy);
-            ZDodge::Target::Render(dl, camX, camY, angleRad, zoom, cx, cy);
+            if (XDodge::IsEnabled())       XDodge::RenderDebugPath(camX, camY, angleRad, zoom, cx, cy);
+            if (RolloutDodge::IsEnabled()) RolloutDodge::RenderDebugPath(camX, camY, angleRad, zoom, cx, cy);
+            if (ZDodge::IsEnabled()) {
+                ZDodge::RenderDebugOverlay(camX, camY, angleRad, zoom, cx, cy);
+                ZDodge::Target::Render(dl, camX, camY, angleRad, zoom, cx, cy);
+            }
         }
 
         // Locked enemy visualization — red reticle + two rings:

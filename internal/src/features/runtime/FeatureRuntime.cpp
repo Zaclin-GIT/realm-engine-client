@@ -13,6 +13,7 @@
 #include "FeatureRuntime.h"
 #include "FeatureState.h"
 #include "FeatureCommandRegistry.h"
+#include "DbgFileLog.h"
 #include "FloatingTextService.h"
 #include "GameState.h"
 #include "AutoAim.h"
@@ -59,7 +60,12 @@ namespace {
         static int s_lastMode = INT32_MIN;
         static float s_lastHorizonMs = -1.f;
         int dodgeMode = FeatureState::GetAutoDodgeMode();
-        if (dodgeMode != s_lastMode) { s_lastMode = dodgeMode; TestTAB::SetDodgeModeWithEnter(static_cast<TestTAB::DodgeMode>(dodgeMode)); }
+        if (dodgeMode != s_lastMode) {
+            DBG_FILE_LOG("[DodgeSwap] IPC autoDodgeMode changed " << s_lastMode << " -> " << dodgeMode
+                << " (this is the raw index the dashboard sent; 4=ZDodge)");
+            s_lastMode = dodgeMode;
+            TestTAB::SetDodgeModeWithEnter(static_cast<TestTAB::DodgeMode>(dodgeMode));
+        }
         if (dodgeMode != static_cast<int>(TestTAB::DodgeMode::Off)) DangerPlanner::TryInstall();
         float horizonMs = FeatureState::GetAutoDodgeHorizonMs();
         if (horizonMs != s_lastHorizonMs) { s_lastHorizonMs = horizonMs; TestTAB::SetDodgeLookaheadMs(horizonMs); }
