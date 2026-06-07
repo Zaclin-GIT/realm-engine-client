@@ -1,6 +1,7 @@
 import { appendFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { DebugManager, DebugChannel } from './DebugManager';
 
 const LOG_FILE = join(tmpdir(), 'realm-engine-proxy.log');
 function fileLog(line: string): void {
@@ -20,6 +21,19 @@ export class Logger {
   }
 
   static log(module: string, message: string): void {
+    const ts = new Date().toISOString().slice(11, 23);
+    const line = `[${ts}] [${module}] ${message}`;
+    console.log(line);
+    fileLog(line);
+  }
+
+  /**
+   * Verbose / diagnostic log gated by a {@link DebugChannel}. Silent (no console,
+   * no file) unless that channel is enabled via RE_DEBUG. Route spam here — see
+   * util/DebugManager.ts for the channel list and how to switch them on.
+   */
+  static debug(channel: DebugChannel, module: string, message: string): void {
+    if (!DebugManager.enabled(channel)) return;
     const ts = new Date().toISOString().slice(11, 23);
     const line = `[${ts}] [${module}] ${message}`;
     console.log(line);

@@ -51,7 +51,7 @@ const STAT_TYPES_JSON = readFileSync(join(DATA_DIR, 'stat-types.json'), 'utf8');
 const SERVERS_JSON = readFileSync(join(DATA_DIR, 'servers.json'), 'utf8');
 
 const EXCLUDED_PLUGINS = new Set([
-  'auto-drink.ts',    // stub
+  'auto-drink',    // directory plugin (plugins/auto-drink/), excluded from prod for now
 ]);
 const ADMIN_ONLY_PLUGINS = new Set([
   'auto-ability.ts',
@@ -288,17 +288,33 @@ if (!ADMIN_BUILD) {
   for (const file of ADMIN_ONLY_PLUGINS)
     excludedPluginFiles.add(file);
 }
-const pluginFiles = readdirSync(PLUGINS_SRC)
-  .filter(f => f.endsWith('.ts') && !excludedPluginFiles.has(f));
+// Discover plugins: top-level `*.ts` files, plus directory plugins
+// (`<name>/index.ts`, bundled to `<name>.js`). Exclusion is keyed by the file
+// name for files and by the folder name for directory plugins.
+const pluginEntries = [];
+for (const name of readdirSync(PLUGINS_SRC)) {
+  const full = join(PLUGINS_SRC, name);
+  const st = statSync(full);
+  if (st.isFile()) {
+    if (name.endsWith('.ts') && !excludedPluginFiles.has(name)) {
+      pluginEntries.push({ entry: full, outName: name.replace(/\.ts$/, '.js') });
+    }
+  } else if (st.isDirectory() && !excludedPluginFiles.has(name)) {
+    const indexEntry = join(full, 'index.ts');
+    if (existsSync(indexEntry)) {
+      pluginEntries.push({ entry: indexEntry, outName: `${name}.js` });
+    }
+  }
+}
 
-for (const file of pluginFiles) {
+for (const { entry, outName } of pluginEntries) {
   await esbuild.build({
-    entryPoints: [join(PLUGINS_SRC, file)],
+    entryPoints: [entry],
     bundle: true,
     platform: 'node',
     target: 'node20',
     format: 'esm',
-    outfile: join(PLUGINS_DIST, file.replace('.ts', '.js')),
+    outfile: join(PLUGINS_DIST, outName),
     minify: true,
     sourcemap: false,
     treeShaking: true,
@@ -317,7 +333,7 @@ for (const file of pluginFiles) {
     logLevel: 'warning',
   });
 }
-log(`${pluginFiles.length} plugins bundled`);
+log(`${pluginEntries.length} plugins bundled`);
 
 // ── Step 6: Obfuscate ────────────────────────────────────────────────────────
 

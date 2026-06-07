@@ -61,7 +61,7 @@
     <ClCompile Include="src\features\combat\autoaim\ProjNoclip.cpp" />
     <ClCompile Include="src\features\movement\noclip\Noclip.cpp" />
     <ClCompile Include="src\features\movement\noclip\NoclipHook.cpp" />
-    <ClCompile Include="src\features\movement\noclip\PlayerCollider.cpp" />
+    <ClCompile Include="src\features\movement\collider\PlayerCollider.cpp" />
     <ClCompile Include="src\features\control\FeatureState.cpp" />
     <ClCompile Include="src\features\control\FeatureCommandRegistry.cpp" />
     <ClCompile Include="src\features\visuals\FloatingTextService.cpp" />
@@ -166,7 +166,7 @@
     <ClInclude Include="src\features\combat\autoaim\ProjNoclip.h" />
     <ClInclude Include="src\features\movement\noclip\Noclip.h" />
     <ClInclude Include="src\features\movement\noclip\NoclipHook.h" />
-    <ClInclude Include="src\features\movement\noclip\PlayerCollider.h" />
+    <ClInclude Include="src\features\movement\collider\PlayerCollider.h" />
     <ClInclude Include="src\features\control\FeatureState.h" />
     <ClInclude Include="src\features\control\FeatureCommandRegistry.h" />
     <ClInclude Include="src\features\visuals\FloatingTextService.h" />

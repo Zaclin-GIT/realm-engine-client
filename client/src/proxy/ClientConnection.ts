@@ -132,7 +132,7 @@ export class ClientConnection {
 
     const key = helloPacket.data.key;
     Logger.log('Client', `Connecting to ${this.state.conTargetAddress}:${this.state.conTargetPort}...`);
-    Logger.log('Client', `HELLO key being sent (${Buffer.isBuffer(key) ? key.length : 0} bytes): ${Buffer.isBuffer(key) ? key.toString('hex').slice(0, 80) : typeof key}`);
+    Logger.debug('reconnect', 'Client', `HELLO key being sent (${Buffer.isBuffer(key) ? key.length : 0} bytes): ${Buffer.isBuffer(key) ? key.toString('hex').slice(0, 80) : typeof key}`);
 
     this.serverSocket.connect(this.state.conTargetPort, this.state.conTargetAddress, () => {
       this.serverConnectedAt = Date.now();
@@ -144,28 +144,28 @@ export class ClientConnection {
       // packet from parsed fields. After a game update, stale packet definitions
       // produce corrupt bytes and DECA drops the connection.
       // forwardRaw preserves the original bytes exactly (decrypt → re-encrypt = identity).
-      Logger.log('Client', `[DIAG-connect] about to forward HELLO (modified=${helloPacket.modified}, rawLen=${helloPacket.rawBytes?.length ?? 0})`);
+      Logger.debug('proxy', 'Client', `[DIAG-connect] about to forward HELLO (modified=${helloPacket.modified}, rawLen=${helloPacket.rawBytes?.length ?? 0})`);
       if (helloPacket.modified) {
         this.sendToServer(helloPacket); // only for reconnect key patching
       } else {
         this.forwardRaw(helloPacket.rawBytes, false);
       }
-      Logger.log('Client', `[DIAG-connect] HELLO forwarded`);
+      Logger.debug('proxy', 'Client', `[DIAG-connect] HELLO forwarded`);
 
       // Flush any packets that arrived from the client while we were connecting.
       // Without this, those packets are lost and the RC4 cipher desyncs.
       this.flushPendingServerQueue();
-      Logger.log('Client', `[DIAG-connect] flushed pending queue (size=${this.pendingServerQueue.length})`);
+      Logger.debug('proxy', 'Client', `[DIAG-connect] flushed pending queue (size=${this.pendingServerQueue.length})`);
 
       try {
         this.proxy.fireClientConnected(this);
-        Logger.log('Client', `[DIAG-connect] fireClientConnected returned`);
+        Logger.debug('proxy', 'Client', `[DIAG-connect] fireClientConnected returned`);
       } catch (err) {
         Logger.error('Client', `[DIAG-connect] fireClientConnected THREW`, err as Error);
       }
       try {
         this._scheduleHelloRetry();
-        Logger.log('Client', `[DIAG-connect] HELLO retry scheduled — waiting for server`);
+        Logger.debug('proxy', 'Client', `[DIAG-connect] HELLO retry scheduled — waiting for server`);
       } catch (err) {
         Logger.error('Client', `[DIAG-connect] _scheduleHelloRetry THREW`, err as Error);
       }
@@ -237,7 +237,7 @@ export class ClientConnection {
   /** Clean up both connections. */
   dispose(): void {
     if (this.closed) return;
-    Logger.log('Client', `[DIAG-dispose] called — stack: ${(new Error().stack ?? '').split('\n').slice(1, 5).join(' | ').trim()}`);
+    Logger.debug('proxy', 'Client', `[DIAG-dispose] called — stack: ${(new Error().stack ?? '').split('\n').slice(1, 5).join(' | ').trim()}`);
     this.closed = true;
 
     if (this._helloRetryTimer) {
@@ -425,7 +425,7 @@ export class ClientConnection {
   private onError(source: string, err: Error): void {
     if (this.closed) return;
     const code = (err as any).code as string | undefined;
-    Logger.log('Client', `[DIAG-onError] source=${source} code=${code ?? 'n/a'} message=${err.message}`);
+    Logger.debug('proxy', 'Client', `[DIAG-onError] source=${source} code=${code ?? 'n/a'} message=${err.message}`);
 
     // ECONNRESET / EPIPE are normal disconnect signals — just clean up
     if (code === 'ECONNRESET' || code === 'EPIPE') {

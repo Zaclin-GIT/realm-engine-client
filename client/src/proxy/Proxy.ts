@@ -76,7 +76,7 @@ export class Proxy extends EventEmitter {
     const newState = new State(client);
     this.states.set(newState.guid, newState);
 
-    Logger.log('State', `Lookup — guid from key: "${guid.slice(0, 40)}", states count: ${this.states.size}, found: ${guid !== 'n/a' && this.states.has(guid)}`);
+    Logger.debug('reconnect', 'State', `Lookup — guid from key: "${guid.slice(0, 40)}", states count: ${this.states.size}, found: ${guid !== 'n/a' && this.states.has(guid)}`);
 
     if (guid !== 'n/a' && this.states.has(guid)) {
       const lastState = this.states.get(guid)!;
@@ -85,7 +85,7 @@ export class Proxy extends EventEmitter {
       newState.conRealKey = lastState.conRealKey;
       newState.pendingKeyRestore = true;
       newState.copyStoreFrom(lastState);
-      Logger.log('State', `Restored from previous — address: ${lastState.conTargetAddress}, port: ${lastState.conTargetPort}, keyLen: ${lastState.conRealKey.length}`);
+      Logger.debug('reconnect', 'State', `Restored from previous — address: ${lastState.conTargetAddress}, port: ${lastState.conTargetPort}, keyLen: ${lastState.conRealKey.length}`);
     }
 
     return newState;

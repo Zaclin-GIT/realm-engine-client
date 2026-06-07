@@ -3,20 +3,21 @@
  * / potion rules, with quickslot stacking, optional stat-pot autodrink, a manual
  * potion guard, a bag-appeared notifier, and "big loot bags".
  *
- * This file is the plugin entry point: it wires the focused modules under
- * `plugins/auto-loot/` together and registers the packet hooks. The actual logic
- * lives in those modules.
+ * Directory plugin: this `index.ts` is the entry point the loader discovers
+ * (plugin id = folder name `auto-loot`). It wires the focused modules in this
+ * folder together and registers the packet hooks; the actual logic lives in
+ * those modules.
  */
 
-import type { PluginContext } from '../src/plugins/PluginContext.js';
-import { LootCatalog } from './auto-loot/catalog.js';
-import { AutoLootSettings } from './auto-loot/settings.js';
-import { StateStore } from './auto-loot/state.js';
-import { LootRules } from './auto-loot/loot-rules.js';
-import { BagScanner, registerBigBags } from './auto-loot/bags.js';
-import { ManualPotionGuard } from './auto-loot/manual-potion-guard.js';
-import { LootEngine } from './auto-loot/engine.js';
-import { BAG_TYPES } from './auto-loot/constants.js';
+import type { PluginContext } from '../../src/plugins/PluginContext.js';
+import { LootCatalog } from './catalog.js';
+import { AutoLootSettings } from './settings.js';
+import { StateStore } from './state.js';
+import { LootRules } from './loot-rules.js';
+import { BagScanner, registerBigBags } from './bags.js';
+import { ManualPotionGuard } from './manual-potion-guard.js';
+import { LootEngine } from './engine.js';
+import { BAG_TYPES } from './constants.js';
 
 export function register(ctx: PluginContext) {
   ctx.name = 'Auto Loot';

@@ -40,6 +40,26 @@ export interface SettingDef {
    *  toggle is on. Default (simple) mode hides it. Use for deep tuning knobs
    *  most users never touch, to keep the panel uncluttered. */
   advanced?: boolean;
+  /**
+   * Show a red warning on this setting (label turns red + an inline alert, plus a
+   * ⚠ icon on the plugin's enable/disable row) when another setting's value
+   * conflicts with this one. Generic: any plugin can declare this; the dashboard
+   * evaluates it from live plugin data, so it stays reactive to changes in either
+   * setting without the plugin pushing updates. Numeric comparison only
+   * (booleans coerce to 0/1).
+   */
+  warnWhen?: {
+    /** Plugin id to read the compared setting from. Defaults to this plugin,
+     *  so a plugin can compare two of its own settings. */
+    pluginId?: string;
+    /** The compared setting's key (e.g. `'threshold'`). */
+    key: string;
+    /** Warn when `other <cmp> this`, where `other` is the compared value and
+     *  `this` is this setting's value. */
+    cmp: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq';
+    /** Warning text shown in red. */
+    message: string;
+  };
 }
 
 /**
@@ -118,7 +138,7 @@ export class PluginContext {
 
   set enabled(val: boolean) {
     this._enabled = val;
-    Logger.log('Plugin', `${this._name} ${val ? 'enabled' : 'disabled'}`);
+    Logger.debug('plugin-config', 'Plugin', `${this._name} ${val ? 'enabled' : 'disabled'}`);
     for (const cb of this._enabledChangeCallbacks) {
       try { cb(val); } catch {}
     }
@@ -208,7 +228,7 @@ export class PluginContext {
     }
 
     setting.value = value;
-    Logger.log('Plugin', `${this._name}: ${setting.label} = ${value}`);
+    Logger.debug('plugin-config', 'Plugin', `${this._name}: ${setting.label} = ${value}`);
 
     const cb = this._settingCallbacks.get(key);
     if (cb) cb(value);

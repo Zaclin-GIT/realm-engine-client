@@ -68,9 +68,6 @@ interface NexusState {
   lastSyncTick: number;
   bullets:      Map<string, TrackedBullet>;
   pendingAoes:  TrackedAoe[];
-  // timestamps for last auto-drink attempts (ms since epoch)
-  lastHpPotAt:  number;
-  lastMpPotAt:  number;
 }
 
 /** Class27 Int32_47: stored ×1000, default 1000. */
@@ -170,24 +167,8 @@ export function register(ctx: PluginContext) {
     label: 'Close-spawn radius (tiles)', advanced: true, type: 'range', value: closeSpawnTiles, min: 0, max: 0.3, step: 0.05,
   }, (v: number) => { closeSpawnTiles = v; });
 
-  // Auto-pot settings (MultiTool parity)
-  let enableAutoPotHP = true;
-  let enableAutoPotMP = true;
-  let autoNexusDrinkThresholdPct = 40;
-  let autoNexusDrinkMpThresholdPct = 20;
-  let autoNexusHpPotDelay = 400; // ms
-  let autoNexusDrinkFromInventory = true;
-
-  ctx.registerSetting('autoPotHP', { label: 'AutoNexus Drink HP (EnableAutoPotHP)', advanced: true, type: 'boolean', value: enableAutoPotHP }, (v: boolean) => { enableAutoPotHP = v === true; });
-  ctx.registerSetting('autoPotMP', { label: 'AutoNexus Drink MP (EnableAutoPotMP)', advanced: true, type: 'boolean', value: enableAutoPotMP }, (v: boolean) => { enableAutoPotMP = v === true; });
-  ctx.registerSetting('drinkHpThreshold', { label: 'AutoNexus HP drink %', advanced: true, type: 'range', value: autoNexusDrinkThresholdPct, min: 1, max: 95, step: 1 }, (v: number) => { autoNexusDrinkThresholdPct = v; });
-  ctx.registerSetting('drinkMpThreshold', { label: 'AutoNexus MP drink %', advanced: true, type: 'range', value: autoNexusDrinkMpThresholdPct, min: 1, max: 95, step: 1 }, (v: number) => { autoNexusDrinkMpThresholdPct = v; });
-  ctx.registerSetting('hpPotDelay', { label: 'AutoNexus HP pot delay (ms)', advanced: true, type: 'number', value: autoNexusHpPotDelay, min: 0, max: 5000, step: 50 }, (v: number) => { autoNexusHpPotDelay = Math.max(0, Math.trunc(Number(v) || 400)); });
-  ctx.registerSetting('drinkFromInventory', { label: 'Drink from inventory first', advanced: true, type: 'boolean', value: autoNexusDrinkFromInventory }, (v: boolean) => { autoNexusDrinkFromInventory = v === true; });
-
-  const BELT_SLOT_BASE = 1000000;
-  const HP_POTION_IDS = new Set<number>([2594, 2736]);
-  const MP_POTION_IDS = new Set<number>([2595, 2781]);
+  // Autopot (HP + MP) lives in the auto-drink plugin. The dashboard warns there
+  // if this nexus threshold is set at/above auto-drink's HP threshold.
 
   const states = new WeakMap<ClientConnection, NexusState>();
 
@@ -202,58 +183,10 @@ export function register(ctx: PluginContext) {
         nexusSent: false, inSafeZone: false,
         lastTickTime: Date.now(), lastSyncTick: 0,
         bullets: new Map(), pendingAoes: [],
-        lastHpPotAt: 0, lastMpPotAt: 0,
       };
       states.set(client, s);
     }
     return s;
-  }
-
-  // Pot belt/inventory helpers (copied/adapted from auto-drink plugin)
-  function findBeltSlot(client: ClientConnection, idSet: Set<number>): { slotId: number; itemType: number } | null {
-    const belt = (client.playerData as any)?.quickSlots ?? [];
-    const cap = (client.playerData as any)?.hasThirdQuickSlot ? 3 : 2;
-    for (let i = 0; i < cap && i < belt.length; i++) {
-      const s: any = belt[i];
-      if (s?.itemType !== -1 && s?.quantity > 0 && idSet.has(s.itemType)) {
-        return { slotId: BELT_SLOT_BASE + i, itemType: s.itemType };
-      }
-    }
-    return null;
-  }
-
-  function findInventorySlot(client: ClientConnection, idSet: Set<number>): { slotId: number; itemType: number } | null {
-    const inv = client.playerData?.inventory ?? [];
-    for (let slot = 4; slot < inv.length; slot++) {
-      const itemId = Number(inv[slot] ?? -1);
-      if (itemId !== -1 && idSet.has(itemId)) {
-        return { slotId: slot, itemType: itemId };
-      }
-    }
-    if (client.playerData?.hasBackpack) {
-      const bp = client.playerData?.backpack ?? [];
-      for (let slot = 0; slot < bp.length; slot++) {
-        const itemId = Number(bp[slot] ?? -1);
-        if (itemId !== -1 && idSet.has(itemId)) {
-          return { slotId: 12 + slot, itemType: itemId };
-        }
-      }
-    }
-    return null;
-  }
-
-  function sendUseItem(client: ClientConnection, slotId: number, itemType: number): void {
-    const pos = client.playerData?.pos ?? { x: 0, y: 0 };
-    const pkt = ctx.createPacket('USEITEM');
-    pkt.data = {
-      time: client.lastUpdate ?? Math.trunc(client.time ?? 0),
-      slotObject: { objectId: client.objectId, slotId, objectType: itemType },
-      itemUsePos: { x: pos.x, y: pos.y },
-      useType: 1,
-      unknownInt: 0,
-    };
-    pkt.modified = true;
-    client.sendToServer(pkt);
   }
 
   /** Run at the start of every hot path: track active client; if nexus already sent, short-circuit. */
@@ -425,44 +358,7 @@ export function register(ctx: PluginContext) {
     const deltaSec = (packet.data.serverRealTimeMSofLastNewTick as number ?? 200) / 1000;
     regenMethod29(state, pd, deltaSec);
 
-    // AutoNexus autopot (MultiTool parity)
-    try {
-      const now = Date.now();
-
-      // HP potion attempt
-      if (enableAutoPotHP && enableAutoNexus && enableAutoNexusOnly && !state.inSafeZone && state.maxHp > 0) {
-        const hpDrinkThreshold = Math.round(autoNexusDrinkThresholdPct * 0.01 * state.maxHp);
-        if (state.clientHp <= hpDrinkThreshold && state.serverHp <= hpDrinkThreshold && now - state.lastHpPotAt > autoNexusHpPotDelay) {
-          const found = autoNexusDrinkFromInventory
-            ? (findInventorySlot(client, HP_POTION_IDS) ?? findBeltSlot(client, HP_POTION_IDS))
-            : (findBeltSlot(client, HP_POTION_IDS) ?? findInventorySlot(client, HP_POTION_IDS));
-          if (found) {
-            sendUseItem(client, found.slotId, found.itemType);
-            state.lastHpPotAt = now;
-            ctx.log(`AutoNexus drank HP pot from slot ${found.slotId}`);
-          }
-        }
-      }
-
-      // MP potion attempt (use playerData.mana / maxMana if available)
-      if (enableAutoPotMP && enableAutoNexus && enableAutoNexusOnly && !state.inSafeZone) {
-        const pdMana = client.playerData?.mana ?? 0;
-        const pdMaxMana = client.playerData?.maxMana ?? 100;
-        const mpThreshold = Math.round(autoNexusDrinkMpThresholdPct * 0.01 * pdMaxMana);
-        if (pdMana <= mpThreshold && now - state.lastMpPotAt > autoNexusHpPotDelay) {
-          const found = autoNexusDrinkFromInventory
-            ? (findInventorySlot(client, MP_POTION_IDS) ?? findBeltSlot(client, MP_POTION_IDS))
-            : (findBeltSlot(client, MP_POTION_IDS) ?? findInventorySlot(client, MP_POTION_IDS));
-          if (found) {
-            sendUseItem(client, found.slotId, found.itemType);
-            state.lastMpPotAt = now;
-            ctx.log(`AutoNexus drank MP pot from slot ${found.slotId}`);
-          }
-        }
-      }
-    } catch (e) {
-      // autopot best-effort — swallow errors
-    }
+    // Autopot (HP + MP) is owned by the auto-drink plugin — see its HP threshold guard.
   }, { prepend: true });
 
   ctx.hookPacket('MOVE', (client, packet) => {

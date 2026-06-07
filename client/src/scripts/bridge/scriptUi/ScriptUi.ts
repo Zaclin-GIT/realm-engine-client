@@ -1,5 +1,6 @@
 import type { BridgeDeps } from '../BridgeDeps.js';
 import { ScriptPanelRegistry } from './ScriptPanels.js';
+import { Logger } from '../../../util/Logger.js';
 
 /**
  * Wired to ScriptHost activity → dashboard script cards (`RealmEngine.ui.status`,
@@ -26,8 +27,8 @@ export function installScriptUiBridge(deps: BridgeDeps): ScriptPanelRegistry {
   };
 
   const re = bag.RealmEngine as Record<string, unknown> | undefined;
-  console.error('[ScriptUiBridge] DIAG: bag.RealmEngine present=%s typeof=%s sameAsBagChat=%s',
-    !!re, typeof re, bag.chat != null);
+  Logger.debug('scripts', 'ScriptUiBridge',
+    `bag.RealmEngine present=${!!re} typeof=${typeof re} sameAsBagChat=${bag.chat != null}`);
   if (re && typeof re === 'object') {
     // Patch in-place on the existing `ui` object rather than replacing it.
     // Replacing would leave any caller that captured `RealmEngine.ui` before
@@ -49,10 +50,10 @@ export function installScriptUiBridge(deps: BridgeDeps): ScriptPanelRegistry {
 
     // DIAG: verify the patch landed on the object the script will read.
     const readBack = (bag.RealmEngine as { ui?: { status?: unknown; panel?: { define?: unknown } } }).ui;
-    console.error('[ScriptUiBridge] DIAG: patched. readBack ui.status patched=%s panel.define patched=%s sameObj=%s',
-      typeof readBack?.status === 'function' && readBack.status === ui.status,
-      typeof readBack?.panel?.define === 'function' && readBack.panel.define === panel.define,
-      readBack === ui);
+    Logger.debug('scripts', 'ScriptUiBridge',
+      `patched. readBack ui.status patched=${typeof readBack?.status === 'function' && readBack.status === ui.status}` +
+      ` panel.define patched=${typeof readBack?.panel?.define === 'function' && readBack.panel.define === panel.define}` +
+      ` sameObj=${readBack === ui}`);
   } else {
     console.error('[ScriptUiBridge] DIAG: bag.RealmEngine not an object — ui NOT patched');
   }

@@ -1,5 +1,5 @@
 import { readdirSync, existsSync } from 'fs';
-import { join, basename, resolve } from 'path';
+import { join, basename, resolve, relative } from 'path';
 import { pathToFileURL } from 'url';
 import { createDecipheriv, createHash, createPublicKey, verify } from 'crypto';
 import { PluginContext, type PluginCategory } from './PluginContext.js';
@@ -385,7 +385,7 @@ export class PluginManager {
     }
 
     plugin.hotkey = hotkey;
-    Logger.log('PluginManager', `Hotkey for ${plugin.name || plugin.id}: ${hotkey || '(none)'}`);
+    Logger.debug('plugin-config', 'PluginManager', `Hotkey for ${plugin.name || plugin.id}: ${hotkey || '(none)'}`);
     return { ok: true, hotkey };
   }
 
@@ -528,25 +528,82 @@ export class PluginManager {
       return;
     }
     const exts = source === 'bundled' ? BUNDLED_PLUGIN_EXTS : USER_PLUGIN_EXTS;
-    const files = readdirSync(dir)
-      .filter((f) => exts.some((e) => f.toLowerCase().endsWith(e)))
+    const entries = this.discoverPluginEntries(dir, exts)
       .sort((a, b) => {
         // Auto Nexus must register before other plugins so its hooks can use prepend and still be first in line.
-        const isNx = (n: string) => stripPluginExt(n).toLowerCase() === 'auto-nexus';
-        const na = isNx(a);
-        const nb = isNx(b);
+        const isNx = (id: string) => id.toLowerCase() === 'auto-nexus';
+        const na = isNx(a.id);
+        const nb = isNx(b.id);
         if (na && !nb) return -1;
         if (!na && nb) return 1;
-        return a.localeCompare(b);
+        return a.id.localeCompare(b.id);
       });
-    for (const file of files) {
-      await this.loadPlugin(join(dir, file), source);
+    for (const { id, entryPath } of entries) {
+      await this.loadPlugin(entryPath, source, id);
     }
   }
 
-  /** Load a single plugin file. `source` defaults to `'bundled'` for back-compat. */
-  async loadPlugin(filePath: string, source: PluginSource = 'bundled'): Promise<void> {
-    const id = stripPluginExt(basename(filePath));
+  /** Entry filename (sans extension) for a directory plugin: `<dir>/index.<ext>`. */
+  private static readonly DIR_PLUGIN_ENTRY = 'index';
+
+  /** Locate a directory plugin's entry file (`index.ts`/`.js`/`.mjs`), or null. */
+  private findDirPluginEntry(dirPath: string, exts: readonly string[]): string | null {
+    for (const e of exts) {
+      const candidate = join(dirPath, `${PluginManager.DIR_PLUGIN_ENTRY}${e}`);
+      if (existsSync(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  /**
+   * Discover plugin entries in `dir`:
+   *  - top-level files → id = filename without extension;
+   *  - subfolders containing an `index` entry → id = folder name (a "directory
+   *    plugin", e.g. `auto-drink/index.ts`, `auto-loot/index.ts`). Subfolders
+   *    without an `index` entry are ignored (they're just import targets).
+   * Top-level files win when an id collides with a directory plugin.
+   */
+  private discoverPluginEntries(dir: string, exts: readonly string[]): { id: string; entryPath: string }[] {
+    const byId = new Map<string, string>();
+    const dirCandidates: { id: string; entryPath: string }[] = [];
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (ent.isFile()) {
+        if (exts.some((e) => ent.name.toLowerCase().endsWith(e))) {
+          byId.set(stripPluginExt(ent.name), join(dir, ent.name));
+        }
+      } else if (ent.isDirectory()) {
+        const entryPath = this.findDirPluginEntry(join(dir, ent.name), exts);
+        if (entryPath) dirCandidates.push({ id: ent.name, entryPath });
+      }
+    }
+    for (const c of dirCandidates) {
+      if (!byId.has(c.id)) byId.set(c.id, c.entryPath);
+    }
+    return [...byId].map(([id, entryPath]) => ({ id, entryPath }));
+  }
+
+  /** Map a watched file under `dir` to the plugin it belongs to (top-level file or directory plugin). */
+  private resolveWatchedPlugin(dir: string, changedPath: string, exts: readonly string[]): { id: string; entryPath: string } | null {
+    const rel = relative(dir, changedPath);
+    if (!rel || rel.startsWith('..')) return null;
+    const segments = rel.split(/[\\/]/);
+    if (segments.length === 1) {
+      if (!exts.some((e) => segments[0].toLowerCase().endsWith(e))) return null;
+      return { id: stripPluginExt(segments[0]), entryPath: join(dir, segments[0]) };
+    }
+    // A file inside a subfolder → reload the directory plugin (id = folder name).
+    const id = segments[0];
+    const entryPath = this.findDirPluginEntry(join(dir, id), exts);
+    return entryPath ? { id, entryPath } : null;
+  }
+
+  /**
+   * Load a single plugin. `source` defaults to `'bundled'` for back-compat.
+   * `idOverride` is the plugin id when it can't be derived from the filename —
+   * e.g. directory plugins use the folder name, not `index`.
+   */
+  async loadPlugin(filePath: string, source: PluginSource = 'bundled', idOverride?: string): Promise<void> {
+    const id = idOverride ?? stripPluginExt(basename(filePath));
 
     try {
       // Unload if already loaded (for hot-reload)
@@ -607,7 +664,7 @@ export class PluginManager {
         userCleanup,
       });
 
-      Logger.log('PluginManager', `Loaded ${source} plugin: ${context.name || id}`);
+      Logger.debug('plugin-load', 'PluginManager', `Loaded ${source} plugin: ${context.name || id}`);
     } catch (err) {
       Logger.error('PluginManager', `Failed to load plugin ${id}`, err as Error);
     }
@@ -844,29 +901,43 @@ export class PluginManager {
   private watchDir(chokidar: any, dir: string, source: PluginSource): any {
     if (!existsSync(dir)) return null;
     const exts = source === 'bundled' ? BUNDLED_PLUGIN_EXTS : USER_PLUGIN_EXTS;
-    const matchesExt = (p: string) => exts.some((e) => p.toLowerCase().endsWith(e));
 
+    // Watches recursively, so changes to a directory plugin's modules
+    // (e.g. auto-drink/catalog.ts) resolve to and reload the parent plugin.
     const watcher = chokidar.watch(dir, {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 500 },
     });
 
     watcher.on('change', async (filePath: string) => {
-      if (!matchesExt(filePath)) return;
-      Logger.log('PluginManager', `Plugin changed: ${basename(filePath)}, reloading...`);
-      await this.loadPlugin(filePath, source);
+      const target = this.resolveWatchedPlugin(dir, filePath, exts);
+      if (!target) return;
+      Logger.log('PluginManager', `Plugin changed: ${target.id}, reloading...`);
+      await this.loadPlugin(target.entryPath, source, target.id);
     });
 
     watcher.on('add', async (filePath: string) => {
-      if (!matchesExt(filePath)) return;
-      Logger.log('PluginManager', `New plugin: ${basename(filePath)}, loading...`);
-      await this.loadPlugin(filePath, source);
+      const target = this.resolveWatchedPlugin(dir, filePath, exts);
+      if (!target) return;
+      Logger.log('PluginManager', `New plugin: ${target.id}, loading...`);
+      await this.loadPlugin(target.entryPath, source, target.id);
     });
 
     watcher.on('unlink', async (filePath: string) => {
-      if (!matchesExt(filePath)) return;
-      const id = stripPluginExt(basename(filePath));
-      await this.unloadPlugin(id);
+      const rel = relative(dir, filePath);
+      if (!rel || rel.startsWith('..')) return;
+      const segments = rel.split(/[\\/]/);
+      if (segments.length === 1) {
+        if (!exts.some((e) => segments[0].toLowerCase().endsWith(e))) return;
+        await this.unloadPlugin(stripPluginExt(segments[0]));
+        return;
+      }
+      // A module file inside a directory plugin was removed: reload the plugin
+      // if its entry survives, otherwise unload it entirely.
+      const id = segments[0];
+      const entryPath = this.findDirPluginEntry(join(dir, id), exts);
+      if (entryPath) await this.loadPlugin(entryPath, source, id);
+      else await this.unloadPlugin(id);
     });
 
     return watcher;

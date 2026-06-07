@@ -6,6 +6,8 @@ import { SDKBridge } from './bridge/index.js';
 import type { BridgeDeps, ScriptLogLevel, ScriptPanelInboundEvent } from './bridge/BridgeDeps.js';
 import { decryptScript } from '../util/ScriptDecryptor.js';
 import type { ScriptRuntimePayload } from '../util/ScriptDecryptor.js';
+import { Logger } from '../util/Logger.js';
+import { DebugManager } from '../util/DebugManager.js';
 
 export interface ScriptInfo {
   id: string;
@@ -306,12 +308,12 @@ export class ScriptHost {
         return { ok: false, error: 'Script must implement onStart(), onLoop(), and onStop()' };
       }
 
-      {
+      if (DebugManager.enabled('scripts')) {
         const diagBag = (globalThis as unknown as { __realmengineSDK?: { RealmEngine?: { ui?: { status?: unknown; panel?: { define?: unknown } } } } }).__realmengineSDK;
         const diagUi = diagBag?.RealmEngine?.ui;
         const diagStatusSrc = typeof diagUi?.status === 'function' ? Function.prototype.toString.call(diagUi.status).slice(0, 60) : String(diagUi?.status);
-        console.error('[ScriptHost] DIAG pre-onStart: bag=%s RealmEngine=%s ui=%s status=%s panel.define=%s\n  status.src=%s',
-          !!diagBag, !!diagBag?.RealmEngine, !!diagUi, typeof diagUi?.status, typeof diagUi?.panel?.define, diagStatusSrc);
+        Logger.debug('scripts', 'ScriptHost',
+          `DIAG pre-onStart: bag=${!!diagBag} RealmEngine=${!!diagBag?.RealmEngine} ui=${!!diagUi} status=${typeof diagUi?.status} panel.define=${typeof diagUi?.panel?.define}\n  status.src=${diagStatusSrc}`);
       }
 
       this.withScriptId(id, () => {

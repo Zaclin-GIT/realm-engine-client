@@ -2,6 +2,7 @@ import type { Proxy } from './Proxy.js';
 import type { ClientConnection } from './ClientConnection.js';
 import type { Packet } from '../packets/Packet.js';
 import { Logger } from '../util/Logger.js';
+import { DebugManager } from '../util/DebugManager.js';
 import { signalHelloEvent } from '../native/hello-event.js';
 import { sendDllFeature } from '../bridge/DllFeatureBus.js';
 
@@ -78,8 +79,8 @@ export class ReconnectHandler {
     const key = packet.data.key as Buffer;
     const keyHex = Buffer.isBuffer(key) ? key.toString('hex') : 'not-a-buffer';
     const keyUtf = Buffer.isBuffer(key) ? key.toString('utf8') : '';
-    Logger.log('Reconnect', `[HELLO] Received — key (${Buffer.isBuffer(key) ? key.length : 0} bytes): ${keyHex}`);
-    Logger.log('Reconnect', `[HELLO] Key as UTF-8: "${keyUtf}"`);
+    Logger.debug('reconnect', 'Reconnect', `[HELLO] Received — key (${Buffer.isBuffer(key) ? key.length : 0} bytes): ${keyHex}`);
+    Logger.debug('reconnect', 'Reconnect', `[HELLO] Key as UTF-8: "${keyUtf}"`);
 
     client.state = this.proxy.getState(client, key);
 
@@ -88,7 +89,7 @@ export class ReconnectHandler {
     if (packet.rawBytes.length > 0) {
       client.state.helloTemplate = Buffer.from(packet.rawBytes);
       client.state.helloKeyOffset = findHelloKeyOffset(client.state.helloTemplate);
-      Logger.log('Reconnect', `[HELLO] Captured template (${client.state.helloTemplate.length} bytes, keyOffset=${client.state.helloKeyOffset})`);
+      Logger.debug('reconnect', 'Reconnect', `[HELLO] Captured template (${client.state.helloTemplate.length} bytes, keyOffset=${client.state.helloKeyOffset})`);
     }
 
     // Capture current gameId (used as a coarse "current map" identifier)
@@ -103,14 +104,14 @@ export class ReconnectHandler {
       client.state.accessToken = accessToken;
     }
 
-    Logger.log('Reconnect', `[HELLO] State lookup — conTargetAddress: ${client.state.conTargetAddress}, conTargetPort: ${client.state.conTargetPort}`);
-    Logger.log('Reconnect', `[HELLO] State lookup — conRealKey (${client.state.conRealKey.length} bytes): ${client.state.conRealKey.toString('hex').slice(0, 80)}`);
+    Logger.debug('reconnect', 'Reconnect', `[HELLO] State lookup — conTargetAddress: ${client.state.conTargetAddress}, conTargetPort: ${client.state.conTargetPort}`);
+    Logger.debug('reconnect', 'Reconnect', `[HELLO] State lookup — conRealKey (${client.state.conRealKey.length} bytes): ${client.state.conRealKey.toString('hex').slice(0, 80)}`);
 
     // For the first connection (no prior RECONNECT), use the IP from the DLL hook
     // But ignore 127.0.0.1 — that's our own proxy address from rewritten RECONNECTs
     if (client.originalTargetIp && client.originalTargetIp !== '127.0.0.1' &&
         client.state.conTargetAddress === '54.241.208.233') {
-      Logger.log('Reconnect', `[HELLO] Overriding default server with DLL target: ${client.originalTargetIp}`);
+      Logger.debug('reconnect', 'Reconnect', `[HELLO] Overriding default server with DLL target: ${client.originalTargetIp}`);
       client.state.conTargetAddress = client.originalTargetIp;
     }
 
@@ -119,13 +120,13 @@ export class ReconnectHandler {
     // HELLO was triggered by a RECONNECT (server-initiated or plugin-initiated).
     if (client.state.pendingKeyRestore) {
       const realKey = client.state.conRealKey;
-      Logger.log('Reconnect', `[HELLO] Restoring key (${realKey.length} bytes): ${realKey.toString('hex').slice(0, 80) || '(empty — fresh connection)'}`);
+      Logger.debug('reconnect', 'Reconnect', `[HELLO] Restoring key (${realKey.length} bytes): ${realKey.toString('hex').slice(0, 80) || '(empty — fresh connection)'}`);
 
       // Patch the key directly in the raw HELLO template instead of re-serializing.
       if (client.state.helloTemplate && client.state.helloKeyOffset >= 0) {
         packet.rawBytes = patchHelloKey(client.state.helloTemplate, client.state.helloKeyOffset, realKey);
         // Do NOT set packet.modified — we want connectToServer to use rawBytes directly
-        Logger.log('Reconnect', `[HELLO] Patched raw template (${packet.rawBytes.length} bytes)`);
+        Logger.debug('reconnect', 'Reconnect', `[HELLO] Patched raw template (${packet.rawBytes.length} bytes)`);
       } else {
         // Fallback: re-serialize (only if template capture failed)
         Logger.warn('Reconnect', '[HELLO] No raw template available, falling back to re-serialization');
@@ -136,27 +137,29 @@ export class ReconnectHandler {
       client.state.conRealKey = Buffer.alloc(0);
       client.state.pendingKeyRestore = false;
     } else {
-      Logger.log('Reconnect', `[HELLO] First connection — keeping original key`);
+      Logger.debug('reconnect', 'Reconnect', `[HELLO] First connection — keeping original key`);
     }
 
     // ── DIAGNOSTIC: compare original bytes vs re-serialized ────────────────
-    // If these differ, re-serialization is corrupting the HELLO.
-    if (packet.rawBytes.length > 0) {
+    // If these differ, re-serialization is corrupting the HELLO. Gated behind the
+    // 'reconnect' debug channel — the re-serialize is pure diagnostic work, so we
+    // skip it entirely (not just the logging) when the channel is off.
+    if (DebugManager.enabled('reconnect') && packet.rawBytes.length > 0) {
       const reserialized = this.proxy.packetFactory.serialize(packet);
       const orig = packet.rawBytes;
       if (orig.length !== reserialized.length) {
-        Logger.warn('Reconnect', `[HELLO DIAG] SIZE MISMATCH: original=${orig.length} serialized=${reserialized.length}`);
+        Logger.debug('reconnect', 'Reconnect', `[HELLO DIAG] SIZE MISMATCH: original=${orig.length} serialized=${reserialized.length}`);
       } else {
         let firstDiff = -1;
         for (let i = 0; i < orig.length; i++) {
           if (orig[i] !== reserialized[i]) { firstDiff = i; break; }
         }
         if (firstDiff >= 0) {
-          Logger.warn('Reconnect', `[HELLO DIAG] BYTE MISMATCH at offset ${firstDiff}: orig=0x${orig[firstDiff].toString(16)} ser=0x${reserialized[firstDiff].toString(16)}`);
-          Logger.warn('Reconnect', `[HELLO DIAG] orig[${firstDiff}-${Math.min(firstDiff+20, orig.length)}]: ${orig.subarray(firstDiff, firstDiff+20).toString('hex')}`);
-          Logger.warn('Reconnect', `[HELLO DIAG]  ser[${firstDiff}-${Math.min(firstDiff+20, reserialized.length)}]: ${reserialized.subarray(firstDiff, firstDiff+20).toString('hex')}`);
+          Logger.debug('reconnect', 'Reconnect', `[HELLO DIAG] BYTE MISMATCH at offset ${firstDiff}: orig=0x${orig[firstDiff].toString(16)} ser=0x${reserialized[firstDiff].toString(16)}`);
+          Logger.debug('reconnect', 'Reconnect', `[HELLO DIAG] orig[${firstDiff}-${Math.min(firstDiff+20, orig.length)}]: ${orig.subarray(firstDiff, firstDiff+20).toString('hex')}`);
+          Logger.debug('reconnect', 'Reconnect', `[HELLO DIAG]  ser[${firstDiff}-${Math.min(firstDiff+20, reserialized.length)}]: ${reserialized.subarray(firstDiff, firstDiff+20).toString('hex')}`);
         } else {
-          Logger.log('Reconnect', `[HELLO DIAG] Bytes match perfectly (${orig.length} bytes)`);
+          Logger.debug('reconnect', 'Reconnect', `[HELLO DIAG] Bytes match perfectly (${orig.length} bytes)`);
         }
       }
     }
@@ -181,8 +184,8 @@ export class ReconnectHandler {
     const name = packet.data.name;
 
     Logger.log('Reconnect', `[RECONNECT] Received — name: "${name}", host: "${host}", port: ${port}, gameId: ${gameId}, keyTime: ${keyTime}`);
-    Logger.log('Reconnect', `[RECONNECT] Key (${Buffer.isBuffer(key) ? key.length : 0} bytes): ${Buffer.isBuffer(key) ? key.toString('hex').slice(0, 80) : 'not-a-buffer'}`);
-    Logger.log('Reconnect', `[RECONNECT] Raw packet size: ${packet.rawBytes.length}, isDefined: ${packet.isDefined}`);
+    Logger.debug('reconnect', 'Reconnect', `[RECONNECT] Key (${Buffer.isBuffer(key) ? key.length : 0} bytes): ${Buffer.isBuffer(key) ? key.toString('hex').slice(0, 80) : 'not-a-buffer'}`);
+    Logger.debug('reconnect', 'Reconnect', `[RECONNECT] Raw packet size: ${packet.rawBytes.length}, isDefined: ${packet.isDefined}`);
     if (packet.unreadData.length > 0) {
       Logger.log('Reconnect', `[RECONNECT] WARNING: ${packet.unreadData.length} unread trailing bytes`);
     }
@@ -204,7 +207,7 @@ export class ReconnectHandler {
       client.state.conRealKey = Buffer.from(key);
     }
 
-    Logger.log('Reconnect', `[RECONNECT] Stored — address: ${client.state.conTargetAddress}, port: ${client.state.conTargetPort}, keyLen: ${client.state.conRealKey.length}`);
+    Logger.debug('reconnect', 'Reconnect', `[RECONNECT] Stored — address: ${client.state.conTargetAddress}, port: ${client.state.conTargetPort}, keyLen: ${client.state.conRealKey.length}`);
 
     // Rewrite the packet to redirect client back to our proxy.
     // Patch raw bytes directly instead of re-serializing from definitions.
@@ -258,7 +261,7 @@ export class ReconnectHandler {
 
       packet.rawBytes = patched;
       // Don't set modified — forwardRaw will use rawBytes
-      Logger.log('Reconnect', `[RECONNECT] Raw-patched (${patched.length} bytes) — host: ${newHost}, port: ${newPort}, guid: "${client.state.guid}"`);
+      Logger.debug('reconnect', 'Reconnect', `[RECONNECT] Raw-patched (${patched.length} bytes) — host: ${newHost}, port: ${newPort}, guid: "${client.state.guid}"`);
     } catch (err) {
       // Fallback to re-serialization if raw patching fails
       Logger.warn('Reconnect', `[RECONNECT] Raw patch failed (${(err as Error).message}), falling back to re-serialization`);

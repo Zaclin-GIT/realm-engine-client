@@ -9214,6 +9214,49 @@
     return (plugins || []).find(function (p) { return p.id === id; });
   }
 
+  function compareWarn(cmp, a, b) {
+    switch (cmp) {
+      case 'gt': return a > b;
+      case 'gte': return a >= b;
+      case 'lt': return a < b;
+      case 'lte': return a <= b;
+      case 'eq': return a === b;
+      case 'neq': return a !== b;
+      default: return false;
+    }
+  }
+
+  // Generic cross-plugin warning (SettingDef.warnWhen): returns the warning text
+  // when the compared setting's value conflicts with this one, else null. Nothing
+  // here is plugin-specific — the relationship is declared in data, so it works
+  // for ANY plugin. `ownerPlugin` owns `s`; warnWhen.pluginId defaults to it, so
+  // a plugin can compare two of its own settings. Read from live `allPluginsData`
+  // so it re-evaluates on every plugins re-render.
+  function evalSettingWarning(s, ownerPlugin) {
+    var w = s && s.warnWhen;
+    if (!w) return null;
+    var otherId = w.pluginId || (ownerPlugin && ownerPlugin.id);
+    var other = findPluginById(allPluginsData, otherId);
+    if (!other || !other.enabled) return null; // no conflict if the referenced plugin is absent/disabled
+    var os = (other.settings || []).find(function (x) { return x.key === w.key; });
+    if (!os) return null;
+    var otherVal = Number(os.value);
+    var thisVal = Number(s.value);
+    if (!Number.isFinite(otherVal) || !Number.isFinite(thisVal)) return null;
+    return compareWarn(w.cmp, otherVal, thisVal) ? (w.message || 'Invalid setting combination.') : null;
+  }
+
+  // First active warning across all of a plugin's settings (or null). Used to
+  // flag the plugin's enable/disable row, not just the individual setting.
+  function pluginFirstWarning(p) {
+    if (!p || !p.settings) return null;
+    for (var i = 0; i < p.settings.length; i++) {
+      var msg = evalSettingWarning(p.settings[i], p);
+      if (msg) return msg;
+    }
+    return null;
+  }
+
   function appendTeleportBeaconSection(parent, p) {
     if (p.id !== 'teleport') return;
     var now = Date.now();
@@ -9296,6 +9339,8 @@
         rowClass += ' setting-row--full';
       }
       if (s.advanced) rowClass += ' setting-advanced';
+      var warnMsg = evalSettingWarning(s, p);
+      if (warnMsg) rowClass += ' setting-row--warn';
       row.className = rowClass;
       row.setAttribute('data-setting-key', s.key);
 
@@ -9438,6 +9483,12 @@
       }
 
       row.appendChild(control);
+      if (warnMsg) {
+        var warnEl = document.createElement('div');
+        warnEl.className = 'setting-warning';
+        warnEl.textContent = '⚠ ' + warnMsg;
+        row.appendChild(warnEl);
+      }
       settingsDiv.appendChild(row);
     });
 
@@ -9816,6 +9867,16 @@
         item.appendChild(lockBadge);
       } else {
         item.appendChild(nameSpan);
+      }
+
+      var sidebarWarn = pluginFirstWarning(p);
+      if (sidebarWarn) {
+        item.classList.add('plugin-sidebar-item--warn');
+        var warnIcon = document.createElement('span');
+        warnIcon.className = 'plugin-sidebar-warning';
+        warnIcon.textContent = '⚠';
+        warnIcon.title = sidebarWarn;
+        item.appendChild(warnIcon);
       }
 
       var toggleLabel = document.createElement('label');

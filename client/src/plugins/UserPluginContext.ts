@@ -61,7 +61,7 @@ export class UserPluginContext {
 
   set enabled(val: boolean) {
     this._enabled = val;
-    Logger.log('Plugin', `${this._name} ${val ? 'enabled' : 'disabled'}`);
+    Logger.debug('plugin-config', 'Plugin', `${this._name} ${val ? 'enabled' : 'disabled'}`);
   }
 
   get name(): string {
@@ -122,7 +122,7 @@ export class UserPluginContext {
     }
 
     setting.value = value;
-    Logger.log('Plugin', `${this._name}: ${setting.label} = ${value}`);
+    Logger.debug('plugin-config', 'Plugin', `${this._name}: ${setting.label} = ${value}`);
 
     const cb = this._settingCallbacks.get(key);
     if (cb) cb(value);

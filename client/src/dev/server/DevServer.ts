@@ -23,12 +23,18 @@ import type { Proxy } from '../../proxy/Proxy.js';
 import type { GameWorldState } from '../../state/GameWorldState.js';
 import type { GameDataLoader } from '../../game-data/GameDataLoader.js';
 import { Logger } from '../../util/Logger.js';
+import { DebugManager } from '../../util/DebugManager.js';
 import { RuntimeScheduler } from '../../util/RuntimeScheduler.js';
 import { getRealmengineDataDir, getRealmengineDocumentsDir } from '../../util/rotmgAssetExtractor.js';
 
 // ── Debug logging ─────────────────────────────────────────────────────────────
+// Gated behind the 'accounts' debug channel (see util/DebugManager.ts). OFF by
+// default: this used to spam stdout AND silently append raw account JSON —
+// plaintext password included — to debug.log on every dashboard load. Now it
+// writes nothing at all unless a dev explicitly opts in with RE_DEBUG=accounts.
 const DEBUG_LOG_PATH = join(process.env.USERPROFILE || '', 'Documents', 'Realmengine', 'debug.log');
 function debugLog(msg: string): void {
+  if (!DebugManager.enabled('accounts')) return;
   const line = `[${new Date().toISOString()}] ${msg}\n`;
   process.stdout.write(line);
   try { writeFileSync(DEBUG_LOG_PATH, line, { flag: 'a' }); } catch { /* ignore */ }

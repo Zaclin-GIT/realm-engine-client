@@ -7855,6 +7855,15 @@ body.theme-light .nearby-row.selected td {
   white-space: nowrap;
 }
 
+/* Warning icon next to the enable/disable switch when a setting is misconfigured. */
+.plugin-sidebar-warning {
+  flex-shrink: 0;
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1;
+  cursor: help;
+}
+
 .toggle-switch-sm {
   width: 36px;
   height: 20px;
@@ -8175,6 +8184,23 @@ body:not(.plugins-advanced) .setting-advanced { display: none !important; }
   color: var(--text-dim);
   flex-shrink: 0;
   margin-right: 12px;
+}
+
+/* SettingDef.warnWhen: misconfigured setting — red label + inline alert below. */
+.setting-row--warn {
+  flex-wrap: wrap;
+}
+
+.setting-row--warn .setting-label {
+  color: var(--red);
+}
+
+.setting-warning {
+  flex-basis: 100%;
+  margin-top: 4px;
+  color: var(--red);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .setting-control {

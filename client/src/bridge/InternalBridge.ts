@@ -385,7 +385,7 @@ export class InternalBridge extends EventEmitter {
       this.readBuf = Buffer.concat([this.readBuf, chunk]);
       if (!this.loggedFirstPipeData && chunk.length > 0) {
         this.loggedFirstPipeData = true;
-        Logger.log('InternalBridge', '[DIAG] first pipe data received from DLL');
+        Logger.debug('proxy', 'InternalBridge', '[DIAG] first pipe data received from DLL');
       }
       this.processMessages();
     });

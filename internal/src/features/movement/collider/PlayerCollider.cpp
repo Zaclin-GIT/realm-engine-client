@@ -12,8 +12,18 @@ constexpr uint32_t kOffCollisionMultiplierFallback = 0x780;
 constexpr size_t kMaxObjectPropertiesTargets = 3;
 constexpr size_t kMaxEntityCandidates = 2;
 
+// One tracked ObjectProperties object: the captured pre-hack game value so the
+// collider can be restored exactly when the feature is turned off.
+struct TrackedProperty {
+    void* ptr = nullptr;
+    float originalMultiplier = 0.0f;
+    bool  hasOriginal = false;
+};
+
+bool g_enabled = false;
 void* g_lastPlayer = nullptr;
-void* g_lastProperties[kMaxObjectPropertiesTargets]{};
+TrackedProperty g_tracked[kMaxObjectPropertiesTargets]{};
+size_t g_trackedCount = 0;
 uint32_t g_collisionMultiplierOffset = kOffCollisionMultiplierFallback;
 
 struct EntityCandidate {
@@ -143,24 +153,61 @@ void* ResolveViewDestroyEntity(void* localPlayer)
     return ReadPointerRef(viewHandler, destroyEntityOffset);
 }
 
-bool TargetsChanged(void* const* properties, size_t propertyCount)
+bool ReadCollisionMultiplier(void* properties, float& out)
 {
-    for (size_t i = 0; i < kMaxObjectPropertiesTargets; ++i) {
-        if (g_lastProperties[i] != (i < propertyCount ? properties[i] : nullptr)) return true;
+    if (!properties) return false;
+    bool ok = false;
+    __try {
+        out = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(properties) + g_collisionMultiplierOffset);
+        ok = true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+    return ok;
+}
+
+bool WriteCollisionMultiplier(void* properties, float value)
+{
+    if (!properties) return false;
+    bool ok = false;
+    __try {
+        *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(properties) + g_collisionMultiplierOffset) = value;
+        ok = true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+    return ok;
+}
+
+// Carry over a previously-captured original for an object we still track, so
+// the per-frame zeroing never clobbers the genuine game value with our own 0.
+bool FindTrackedOriginal(void* properties, float& outOriginal)
+{
+    for (size_t i = 0; i < g_trackedCount; ++i) {
+        if (g_tracked[i].ptr == properties && g_tracked[i].hasOriginal) {
+            outOriginal = g_tracked[i].originalMultiplier;
+            return true;
+        }
     }
     return false;
 }
 
-void RememberTargets(void* const* properties, size_t propertyCount)
+// Write each captured game value back to the collider we zeroed, then drop the
+// tracking set. Used when the feature is turned off while the scene is live.
+void RestoreTrackedColliders()
 {
-    for (size_t i = 0; i < kMaxObjectPropertiesTargets; ++i)
-        g_lastProperties[i] = i < propertyCount ? properties[i] : nullptr;
+    for (size_t i = 0; i < g_trackedCount; ++i) {
+        if (g_tracked[i].ptr && g_tracked[i].hasOriginal)
+            WriteCollisionMultiplier(g_tracked[i].ptr, g_tracked[i].originalMultiplier);
+    }
+    for (TrackedProperty& tracked : g_tracked) tracked = TrackedProperty{};
+    g_trackedCount = 0;
 }
 
-void ClearRememberedTargets()
+// Drop the tracking set without restoring — the underlying objects are gone
+// (player/scene change), so there is no live collider left to restore.
+void ForgetTrackedColliders()
 {
-    for (void*& properties : g_lastProperties)
-        properties = nullptr;
+    for (TrackedProperty& tracked : g_tracked) tracked = TrackedProperty{};
+    g_trackedCount = 0;
 }
 
 bool AddObjectPropertiesTarget(void** properties, size_t& propertyCount, void* candidate)
@@ -190,19 +237,6 @@ size_t CollectPlayerObjectProperties(void* entity, const ObjectPropertiesTarget*
         AddObjectPropertiesTarget(outProperties, propertyCount, properties);
     }
     return propertyCount;
-}
-
-bool ApplyPropertiesMultiplier(void* properties, const char* reason, UpdateLogFn logFn)
-{
-    if (!properties) return false;
-
-    bool updated = false;
-    __try {
-        float& multiplier = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(properties) + g_collisionMultiplierOffset);
-        updated = ApplyMultiplier(multiplier, properties, reason, logFn);
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {}
-    return updated;
 }
 
 } // namespace
@@ -260,6 +294,14 @@ bool ApplyEntityMultiplierTargets(void* entityPtr,
 
 void Tick(void* player)
 {
+    // Feature off: undo anything we applied (once), then stay out of the game's
+    // way. This is what makes the collider behave when autododge is disabled.
+    if (!g_enabled) {
+        if (g_trackedCount) RestoreTrackedColliders();
+        g_lastPlayer = player;
+        return;
+    }
+
     if (!player) {
         if (g_lastPlayer) ResetScene();
         return;
@@ -289,25 +331,62 @@ void Tick(void* player)
     if (propertyCount == 0)
         return;
 
-    const bool changedObject = player != g_lastPlayer || TargetsChanged(properties, propertyCount);
-    g_lastPlayer = player;
-    RememberTargets(properties, propertyCount);
+    // Rebuild the tracking set: keep the captured original for objects we already
+    // track, capture a fresh one for newcomers, then force each collider to zero.
+    TrackedProperty next[kMaxObjectPropertiesTargets]{};
+    size_t nextCount = 0;
+    for (size_t i = 0; i < propertyCount; ++i) {
+        void* propertiesPtr = properties[i];
+        TrackedProperty entry;
+        entry.ptr = propertiesPtr;
 
-    const char* reason = changedObject ? "player-or-scene-change" : "value-restored";
-    for (size_t i = 0; i < propertyCount; ++i)
-        ApplyPropertiesMultiplier(properties[i], reason, nullptr);
+        float carried = 0.0f;
+        if (FindTrackedOriginal(propertiesPtr, carried)) {
+            entry.originalMultiplier = carried;
+            entry.hasOriginal = true;
+        } else {
+            // Only a finite, non-zero read is the genuine game value. A zero is
+            // almost certainly our own prior write, and capturing it would make
+            // the eventual restore a silent no-op.
+            float current = 0.0f;
+            if (ReadCollisionMultiplier(propertiesPtr, current) && std::isfinite(current) && current != 0.0f) {
+                entry.originalMultiplier = current;
+                entry.hasOriginal = true;
+            }
+        }
+
+        WriteCollisionMultiplier(propertiesPtr, 0.0f);
+        next[nextCount++] = entry;
+    }
+
+    for (size_t i = 0; i < kMaxObjectPropertiesTargets; ++i)
+        g_tracked[i] = (i < nextCount) ? next[i] : TrackedProperty{};
+    g_trackedCount = nextCount;
+
+    g_lastPlayer = player;
+}
+
+void SetEnabled(bool enabled)
+{
+    g_enabled = enabled;
+}
+
+bool IsEnabled()
+{
+    return g_enabled;
 }
 
 void ResetScene()
 {
     g_lastPlayer = nullptr;
-    ClearRememberedTargets();
+    ForgetTrackedColliders();
 }
 
 void ResetStateForTest()
 {
+    g_enabled = false;
     g_lastPlayer = nullptr;
-    ClearRememberedTargets();
+    ForgetTrackedColliders();
 }
 
 } // namespace PlayerCollider
