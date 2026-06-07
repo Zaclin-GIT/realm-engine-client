@@ -232,14 +232,12 @@
             <span class="launcher-quick-label">Quick Launch</span>
           </button>
           <button type="button" class="launcher-quick-btn" data-launcher-tab="plugins">Plugins</button>
-          <button type="button" class="launcher-quick-btn admin-only" data-launcher-tab="market">Market</button>
         </div>
       </div>
       <div id="content-tabs">
         <button class="content-tab active" data-tab="home" data-icon="H" data-label="Home" data-i18n="tab.home">Home</button>
         <button class="content-tab" data-tab="plugins" data-icon="P" data-label="Plugins" data-i18n="tab.plugins">Plugins</button>
         <button class="content-tab" data-tab="hotkeys" data-icon="K" data-label="Hotkeys">Hotkeys</button>
-        <button class="content-tab admin-only" data-tab="market" data-icon="$" data-label="Market" data-i18n="tab.market">Market</button>
         <button class="content-tab" data-tab="accounts" data-icon="A" data-label="Accounts" data-i18n="tab.accounts">Accounts</button>
         <button class="content-tab admin-only" data-tab="logs" data-icon="L" data-label="Logs" data-i18n="tab.logs">Logs</button>
         <button class="content-tab" data-tab="damage" data-icon="D" data-label="Damage Sniffer" data-i18n="tab.damage">Damage Sniffer</button>
@@ -470,45 +468,6 @@
         </div>
       </div>
 
-      <div id="tab-market" class="tab-panel admin-only" style="display:none;">
-        <div class="market-layout">
-          <aside class="market-sidebar">
-            <div class="market-brand">
-              <span class="market-brand-title">Realm Market</span>
-            </div>
-            <nav class="market-nav" id="market-nav">
-              <button type="button" class="market-nav-btn active" data-market-sub="scripts" data-i18n="tab.scripts">Scripts</button>
-              <button type="button" class="market-nav-btn" data-market-sub="maxing">Maxing</button>
-            </nav>
-            <div class="market-cart-panel">
-              <div class="market-cart-head">Cart <span id="market-cart-count" class="market-cart-badge">0</span></div>
-              <div id="market-cart-items" class="market-cart-items"></div>
-              <div class="market-cart-foot">
-                <div class="market-cart-total">Total <span id="market-cart-total-gems">0</span><span class="market-gem-label">G</span></div>
-                <button type="button" id="market-checkout-btn" class="setting-btn market-checkout-btn">Checkout</button>
-                <button type="button" id="market-cart-clear-btn" class="setting-btn setting-btn-secondary market-cart-clear">Clear</button>
-              </div>
-            </div>
-          </aside>
-          <main class="market-main">
-            <div id="market-loading" class="market-loading">Loading catalog…</div>
-            <div id="market-error" class="market-error" style="display:none;"></div>
-            <div id="market-content" class="market-content" style="display:none;">
-              <div id="market-toolbar" class="market-toolbar"></div>
-              <div id="market-body" class="market-body"></div>
-            </div>
-          </main>
-        </div>
-        <div id="market-script-buy-modal" class="market-modal" style="display:none" aria-hidden="true">
-          <div class="market-modal-backdrop" data-market-modal-close></div>
-          <div class="market-modal-panel" role="dialog" aria-modal="true" aria-labelledby="market-script-buy-modal-title">
-            <h4 id="market-script-buy-modal-title" class="market-modal-title"></h4>
-            <p class="market-modal-sub">Choose billing. Prices are in gems (G). <strong>100 gems = $1</strong> (1 gem = 1¢).</p>
-            <div id="market-script-buy-modal-actions" class="market-modal-actions"></div>
-            <button type="button" class="setting-btn setting-btn-secondary market-modal-cancel" data-market-modal-close>Cancel</button>
-          </div>
-        </div>
-      </div>
 
       <div id="tab-accounts" class="tab-panel" style="display:none;">
         <!-- Empty-state setup (shown when zero accounts) -->
