@@ -46,11 +46,6 @@
   <div id="main">
     <!-- Player card (left) -->
     <div id="player-card">
-      <!-- Account / balance summary has moved to the Settings tab. Two hidden
-           spans remain so existing live-update code that writes the balance
-           and plan name doesn't have to null-check. -->
-      <span id="titlebar-gems" hidden>0</span>
-      <span id="titlebar-plan" hidden>Free</span>
 
       <div id="player-identity">
         <div id="player-avatar">?</div>
@@ -2232,50 +2227,8 @@
           </div>
         </div>
 
-        <!-- Billing stats row -->
-        <div class="acct-pop-stats">
-          <div class="acct-pop-stat-card">
-            <span class="acct-pop-stat-label" data-i18n="accountPopup.gemBalance">Gem Balance</span>
-            <div class="acct-pop-stat-value-row">
-              <span class="acct-pop-stat-value" id="account-popup-gem-balance">0</span>
-              <span class="market-gem-label">G</span>
-            </div>
-            <span id="account-popup-gem-badge" class="acct-badge acct-badge--inactive">Inactive</span>
-            <span id="account-popup-gem-next-deduction" class="acct-pop-stat-sub hidden"></span>
-          </div>
-          <div class="acct-pop-stat-card">
-            <span class="acct-pop-stat-label" data-i18n="accountPopup.currentPlan">Current Plan</span>
-            <div class="acct-pop-stat-value-row">
-              <span class="acct-pop-stat-value" id="account-popup-plan-name">Free</span>
-            </div>
-            <span id="account-popup-plan-status" class="acct-sub-status hidden"></span>
-            <span id="account-popup-plan-expires" class="acct-pop-stat-sub hidden"></span>
-          </div>
-        </div>
 
         <!-- Actions -->
-        <div class="acct-pop-actions">
-          <button type="button" id="account-popup-buy-gems" class="acct-pop-action-btn">
-            <span class="acct-pop-action-icon">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-            </span>
-            <span class="acct-pop-action-text">
-              <span class="acct-pop-action-title" data-i18n="accountPopup.buyGems.title">Buy Gems</span>
-              <span class="acct-pop-action-desc" data-i18n="accountPopup.buyGems.desc">Add gems to your balance</span>
-            </span>
-            <span class="acct-pop-action-arrow">›</span>
-          </button>
-          <button type="button" id="account-popup-manage-plan" class="acct-pop-action-btn">
-            <span class="acct-pop-action-icon">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-            </span>
-            <span class="acct-pop-action-text">
-              <span class="acct-pop-action-title" data-i18n="accountPopup.managePlan.title">Manage Plan</span>
-              <span class="acct-pop-action-desc" data-i18n="accountPopup.managePlan.desc">View or change your subscription</span>
-            </span>
-            <span class="acct-pop-action-arrow">›</span>
-          </button>
-        </div>
       </div>
 
       <!-- Footer -->
