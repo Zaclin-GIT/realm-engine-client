@@ -443,10 +443,6 @@ async function main() {
     () => ({ worldState, projectileTracker }),
   );
 
-  // Admin dev: gate always active, all plans granted, admin mode on — no sign-in required.
-  pluginManager.loginGateActive = true;
-  pluginManager.adminMode = true;
-  pluginManager.setActivePlans(['free', 'dodge', 'developer', 'pro', 'elite', 'combined']);
 
   // 6. Dev dashboard FIRST — Electron only waits ~10s for http://localhost:3000; metadata fetch can be slow
   let devServer: DevServer | undefined;

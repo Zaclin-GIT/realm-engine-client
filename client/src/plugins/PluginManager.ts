@@ -182,28 +182,9 @@ interface SecureBundleEnvelope {
  * Each plugin exports a `register(ctx: PluginContext)` function.
  */
 export class PluginManager {
-  /**
-   * Maps normalized plan names to the plugin IDs that require that plan.
-   * 'combined' is not listed here — it is expanded to 'dodge' + 'developer' in setActivePlans().
-   */
-  private static readonly planGatedPlugins: Record<string, string[]> = {
-    dodge: ['auto-dodge', 'safe-walk', 'godfarming'],
-    developer: ['spoof-push-tiles'],
-  };
-
   /** Hidden dashboard service plugins that must keep running even when plugin profiles/logins change. */
   private static readonly alwaysEnabledPluginIds = new Set<string>([
     'damage-sniffer',
-  ]);
-
-  /** Plugins only visible and usable when the logged-in user is an admin. */
-  private static readonly adminGatedPluginIds = new Set<string>([
-    'admin-autododge',
-    'camera-controls',
-    'auto-drink',
-    'rollback',
-    'auto-ability',
-    'player-noclip',
   ]);
 
   private loadedPlugins = new Map<string, LoadedPlugin>();
@@ -218,18 +199,6 @@ export class PluginManager {
   };
   private dashboardLogListeners = new Set<(pluginName: string, message: string) => void>();
   private broadcastDataListeners = new Set<(pluginId: string, type: string, data: any) => void>();
-
-  /** Admin dev: always true — plugins usable without sign-in. */
-  loginGateActive = true;
-
-  /**
-   * Currently active plan names (normalized to lowercase).
-   * 'combined' is expanded to both 'dodge' and 'developer' via setActivePlans().
-   */
-  activePlans = new Set<string>(['free', 'dodge', 'developer', 'pro', 'elite', 'combined']);
-
-  /** Admin dev: always true — admin-gated plugins always visible and usable. */
-  adminMode = true;
 
   constructor(
     private proxy: Proxy,
@@ -252,10 +221,9 @@ export class PluginManager {
     this.sessionStateResolver = sessionStateResolver;
   }
 
-  /** Get all loaded plugins (for dashboard). Admin-gated plugins hidden when adminMode is off. */
+  /** Get all loaded plugins (for dashboard). */
   getPlugins(): { id: string; name: string; enabled: boolean; category: PluginCategory; settings: any[]; source: PluginSource; requiredPlan: string | null; hotkey: string; hotkeyLocked: boolean }[] {
     return Array.from(this.loadedPlugins.values())
-      .filter(p => !this.isAdminGated(p.id) || this.adminMode)
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(p => ({
         id: p.id,
@@ -264,7 +232,7 @@ export class PluginManager {
         category: p.context.category,
         settings: this.getDashboardSettings(p),
         source: p.source,
-        requiredPlan: this.getRequiredPlan(p.id),
+        requiredPlan: null,
         hotkey: p.hotkey,
         hotkeyLocked: this.isAlwaysEnabled(p.id),
       }));
@@ -276,59 +244,15 @@ export class PluginManager {
       if (plugin.id === 'speed-hack' && s.key === 'speedMult') {
         s.min = 1;
         s.step = 0.1;
-        if (this.adminMode) {
-          s.type = 'number';
-          delete s.max;
-        } else {
-          s.type = 'range';
-          s.max = 4;
-          if (Number(s.value) > 4) s.value = 4;
-        }
+        s.type = 'number';
+        delete s.max;
       }
       return s;
     });
   }
 
-  /** Returns the plan name required to use this plugin, or null if freely available. */
-  getRequiredPlan(_pluginId: string): string | null {
-    // Admin dev: no plan required for any plugin.
-    return null;
-  }
-
-  private isAdminGated(pluginId: string): boolean {
-    return PluginManager.adminGatedPluginIds.has(pluginId);
-  }
-
   private isAlwaysEnabled(pluginId: string): boolean {
     return PluginManager.alwaysEnabledPluginIds.has(pluginId);
-  }
-
-  /**
-   * Update the set of active plans from the server subscription response.
-   * Expands 'combined' → 'dodge' + 'developer'.
-   * Automatically disables plugins for any plan that is no longer active.
-   */
-  setActivePlans(planNames: string[]): void {
-    const next = new Set<string>();
-    for (const name of planNames) {
-      const lower = name.toLowerCase();
-      next.add(lower);
-      if (lower) {
-        next.add('dodge');
-        next.add('developer');
-      }
-    }
-    // Disable plugins for plans that are no longer active
-    // for (const [plan, ids] of Object.entries(PluginManager.planGatedPlugins)) {
-    //   if (!next.has(plan)) {
-    //     for (const id of ids) {
-    //       if (this.isAlwaysEnabled(id)) continue;
-    //       const plugin = this.loadedPlugins.get(id);
-    //       if (plugin && plugin.source === 'bundled') plugin.context.enabled = false;
-    //     }
-    //   }
-    // }
-    this.activePlans = next;
   }
 
   /**
@@ -345,8 +269,6 @@ export class PluginManager {
       plugin.context.enabled = true;
       return { ok: true };
     }
-    const gated = plugin.source === 'bundled';
-    // Admin dev: all gate checks removed — every plugin can be toggled freely.
     plugin.context.enabled = enabled;
     sendDllFeature('showPluginFloatingText', `${plugin.name}: ${enabled ? 'Enabled' : 'Disabled'}`);
     return { ok: true };
@@ -410,39 +332,6 @@ export class PluginManager {
     }
   }
 
-  /** Disable admin-gated plugins (called when admin mode is revoked). */
-  disableAdminGatedPlugins(): void {
-    for (const plugin of this.loadedPlugins.values()) {
-      if (plugin.source !== 'bundled') continue;
-      if (this.isAdminGated(plugin.id)) {
-        plugin.context.enabled = false;
-      }
-    }
-  }
-
-  /** Clamp settings that admin users can raise beyond normal user limits. */
-  enforceNonAdminSettingCaps(): void {
-    if (this.adminMode) return;
-    const speedHack = this.loadedPlugins.get('speed-hack');
-    if (!speedHack) return;
-    const current = Number(speedHack.context.getSetting('speedMult'));
-    if (Number.isFinite(current) && current > 4) {
-      speedHack.context.updateSetting('speedMult', 4);
-    }
-  }
-
-  /** Disable all plan-gated plugins (called when login is lost or subscription status is unknown). */
-  disableGemGatedPlugins(): void {
-    if (this.adminMode) return;
-    for (const ids of Object.values(PluginManager.planGatedPlugins)) {
-      for (const id of ids) {
-        if (this.isAlwaysEnabled(id)) continue;
-        const plugin = this.loadedPlugins.get(id);
-        if (plugin && plugin.source === 'bundled') plugin.context.enabled = false;
-      }
-    }
-  }
-
   /** Subscribe to dashboard-only log messages from plugins. */
   onDashboardLog(listener: (pluginName: string, message: string) => void): () => void {
     this.dashboardLogListeners.add(listener);
@@ -475,13 +364,10 @@ export class PluginManager {
   updateSetting(pluginId: string, key: string, value: any): boolean {
     const plugin = this.loadedPlugins.get(pluginId);
     if (!plugin) return false;
-    if (plugin.source === 'bundled' && this.isAdminGated(pluginId) && !this.adminMode) {
-      return false;
-    }
-    if (pluginId === 'speed-hack' && key === 'speedMult' && !this.adminMode) {
+    if (pluginId === 'speed-hack' && key === 'speedMult') {
       const numericValue = Number(value);
       if (!Number.isFinite(numericValue)) return false;
-      value = Math.min(4, Math.max(1, numericValue));
+      value = Math.max(1, numericValue);
     }
     return plugin.context.updateSetting(key, value);
   }
