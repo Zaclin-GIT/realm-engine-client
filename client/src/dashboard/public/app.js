@@ -763,10 +763,6 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
   const nearbyDebugTreeEl = document.getElementById('nearby-debug-tree');
   const nearbyDebugEmptyEl = document.getElementById('nearby-debug-empty');
   const nearbyDebugSubtitleEl = document.getElementById('nearby-debug-subtitle');
-  const overlayLoginError = document.getElementById('overlay-login-error');
-  const overlayEmailInput = document.getElementById('overlay-email');
-  const overlayPasswordInput = document.getElementById('overlay-password');
-  const overlayPasswordToggleBtn = document.getElementById('overlay-password-toggle');
   const itemDetailOverlay = document.getElementById('item-detail-overlay');
   const itemDetailCloseBtn = document.getElementById('item-detail-close');
   const itemDetailTitleEl = document.getElementById('item-detail-title');
@@ -785,566 +781,6 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
     }
   }
 
-  function formatGemBalanceDisplay(n) {
-    var x = Number(n);
-    if (!isFinite(x)) return '0';
-    if (Math.floor(x) === x) return String(Math.floor(x));
-    return String(x);
-  }
-
-  /** Last known gem balance from the API; null until first successful fetch. */
-  var lastKnownGemBalance = null;
-
-  /** 1 gem = 1 US cent (100 gems = $1). Returns e.g. "$1.00" or "—". */
-  function formatUsdFromGemCount(gemCount) {
-    var n = Number(gemCount);
-    if (!isFinite(n) || n < 0) return '—';
-    var dollars = n / 100;
-    try {
-      return dollars.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-    } catch (e) {
-      return '$' + dollars.toFixed(2);
-    }
-  }
-
-  /**
-   * @param {{ gems?: number }} [opts] - If gems is a positive integer, appends ?gems= (gem count) to the payment URL.
-   */
-  /**
-   * @param {{ gems?: number, method?: string }} [opts]
-   * gems appends ?gems=N, method appends &method=X to the payment URL.
-   */
-  function openRealmEnginePaymentPage(opts) {
-    opts = opts || {};
-    var url = REALM_ENGINE_WEB_BASE + '/payment';
-    var params = [];
-    var g = opts.gems;
-    if (g != null && g !== '') {
-      var n = parseInt(String(g), 10);
-      if (isFinite(n) && n >= 1) params.push('gems=' + encodeURIComponent(String(n)));
-    }
-    if (opts.method) params.push('method=' + encodeURIComponent(String(opts.method)));
-    if (params.length) url += '?' + params.join('&');
-    try {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (e) {
-      window.location.href = url;
-    }
-  }
-
-  function getPurchaseModalGemQty() {
-    var input = document.getElementById('purchase-modal-gem-qty');
-    if (!input) return NaN;
-    return parseInt(String(input.value).trim(), 10);
-  }
-
-  function updatePurchaseModalTotal() {
-    var totalEl = document.getElementById('purchase-modal-total');
-    var errEl = document.getElementById('purchase-modal-qty-error');
-    if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
-    var n = getPurchaseModalGemQty();
-    if (!totalEl) return;
-    if (!isFinite(n) || n < 1) {
-      totalEl.innerHTML = '= <strong>—</strong>';
-      return;
-    }
-    if (n < 50) {
-      totalEl.innerHTML = '= <strong class="purchase-qty-warn">min. 50 gems</strong>';
-      return;
-    }
-    totalEl.innerHTML = '= <strong>' + formatUsdFromGemCount(n) + '</strong>';
-    // Highlight matching quick button
-    document.querySelectorAll('.purchase-quick-btn').forEach(function (btn) {
-      btn.classList.toggle('active', parseInt(btn.getAttribute('data-quick-gems') || '0', 10) === n);
-    });
-  }
-
-  function validatePurchaseModalQty() {
-    var errEl = document.getElementById('purchase-modal-qty-error');
-    var n = getPurchaseModalGemQty();
-    if (!isFinite(n) || n < 50) {
-      if (errEl) { errEl.textContent = 'Enter a whole number of gems (minimum 50).'; errEl.classList.remove('hidden'); }
-      return null;
-    }
-    if (n > 999999) {
-      if (errEl) { errEl.textContent = 'Maximum 999,999 gems per purchase.'; errEl.classList.remove('hidden'); }
-      return null;
-    }
-    if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
-    return n;
-  }
-
-  function purchaseModalCheckout() {
-    var n = validatePurchaseModalQty();
-    if (n == null) return;
-    // Move to step 2 — payment method
-    var step1 = document.getElementById('purchase-step-qty');
-    var step2 = document.getElementById('purchase-step-method');
-    var summary = document.getElementById('purchase-method-summary');
-    if (summary) summary.innerHTML = String(n) + '<span class="market-gem-label">G</span> (' + formatUsdFromGemCount(n) + ')';
-    // Clear any previous selection
-    document.querySelectorAll('.purchase-method-btn').forEach(function (b) { b.classList.remove('selected'); });
-    if (step1) step1.classList.add('hidden');
-    if (step2) step2.classList.remove('hidden');
-  }
-
-  function purchaseGoBack() {
-    var step1 = document.getElementById('purchase-step-qty');
-    var step2 = document.getElementById('purchase-step-method');
-    if (step2) step2.classList.add('hidden');
-    if (step1) step1.classList.remove('hidden');
-    // Collapse any open payment category panels
-    document.querySelectorAll('.pay-cat-options').forEach(function (p) { p.classList.add('hidden'); });
-    document.querySelectorAll('.pay-cat-row--expand').forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
-  }
-
-  var CRYPTO_CURRENCIES = { btc: true, eth: true, usdt: true, ltc: true, xmr: true };
-
-  function purchaseWithMethod(method) {
-    var n = validatePurchaseModalQty();
-    if (n === null) return;
-    if (!dashboardLoggedIn || !accessToken) { closePurchaseModal(); return; }
-
-    if (method === 'stripe_card') {
-      var btn = document.querySelector('[data-method="stripe_card"]');
-      if (btn) btn.textContent = 'Opening…';
-      fetch('/api/payments/stripe/create-checkout-dynamic', {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gems: n }),
-      })
-        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-        .then(function (result) {
-          closePurchaseModal();
-          if (!result.ok || !result.data.checkout_url) {
-            alert('Could not start Stripe checkout: ' + (result.data.detail || 'unknown error'));
-            return;
-          }
-          try { window.open(result.data.checkout_url, '_blank', 'noopener,noreferrer'); }
-          catch (e) { window.location.href = result.data.checkout_url; }
-        })
-        .catch(function () { closePurchaseModal(); alert('Network error starting card checkout. Try again.'); })
-        .finally(function () { if (btn) btn.textContent = 'Pay with Card'; });
-      return;
-    }
-
-    if (CRYPTO_CURRENCIES[method]) {
-      var cryptoBtn = document.querySelector('[data-method="' + method + '"]');
-      var origText = cryptoBtn ? cryptoBtn.textContent : '';
-      if (cryptoBtn) { cryptoBtn.textContent = 'Opening…'; cryptoBtn.disabled = true; }
-      fetch('/api/payments/create-bundle-dynamic', {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gems: n, pay_currency: method }),
-      })
-        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-        .then(function (result) {
-          closePurchaseModal();
-          if (!result.ok || !result.data.invoice_url) {
-            alert('Could not create crypto invoice: ' + (result.data.detail || 'unknown error'));
-            return;
-          }
-          try { window.open(result.data.invoice_url, '_blank', 'noopener,noreferrer'); }
-          catch (e) { window.location.href = result.data.invoice_url; }
-        })
-        .catch(function () { closePurchaseModal(); alert('Network error starting crypto checkout. Try again.'); })
-        .finally(function () {
-          if (cryptoBtn) { cryptoBtn.textContent = origText; cryptoBtn.disabled = false; }
-        });
-      return;
-    }
-
-    closePurchaseModal();
-    openRealmEnginePaymentPage({ gems: n, method: method });
-  }
-
-  function refreshAccountBillingFromApi() {
-    var gemVal   = document.getElementById('account-popup-gem-balance');
-    var gemNext  = document.getElementById('account-popup-gem-next-deduction');
-    var gemBadge = document.getElementById('account-popup-gem-badge');
-    var planEl   = document.getElementById('account-popup-plan-name');
-    var stEl     = document.getElementById('account-popup-plan-status');
-    var exEl     = document.getElementById('account-popup-plan-expires');
-    var tbGems   = document.getElementById('titlebar-gems');
-    var tbPlan   = document.getElementById('titlebar-plan');
-    var macGems  = document.getElementById('multi-account-gems');
-    var macPlan  = document.getElementById('multi-account-plan');
-
-    function setSidebarBilling(gemsText, planText) {
-      if (tbGems) tbGems.textContent = gemsText;
-      if (tbPlan) tbPlan.textContent = planText;
-      if (macGems) macGems.textContent = gemsText;
-      if (macPlan) macPlan.textContent = planText;
-    }
-
-    function resetBillingUi() {
-      if (gemVal)  gemVal.textContent = '0';
-      if (gemBadge) { gemBadge.textContent = t('accountPopup.gemStatus.inactive'); gemBadge.classList.add('acct-badge--inactive'); gemBadge.classList.remove('acct-badge--active'); }
-      if (gemNext) { gemNext.textContent = ''; gemNext.classList.add('hidden'); }
-      if (planEl)  planEl.textContent = t('accountPopup.plan.free');
-      if (stEl)    { stEl.textContent = ''; stEl.classList.add('hidden'); }
-      if (exEl)    { exEl.textContent = ''; exEl.classList.add('hidden'); }
-      setSidebarBilling('0', t('accountPopup.plan.free'));
-    }
-
-    if (!dashboardLoggedIn || !accessToken) {
-      resetBillingUi();
-      dashboardSubscriptionTier = 'Free';
-      updateDashboardAvailabilityUi();
-      return;
-    }
-
-    var headers = { Authorization: 'Bearer ' + accessToken };
-    Promise.all([
-      fetch('/api/payments/gems/status', { headers: headers }).then(function (r) {
-        return r.json().catch(function () { return null; }).then(function (d) { return { ok: r.ok, data: d }; });
-      }),
-      fetch('/api/payments/subscription', { headers: headers }).then(function (r) {
-        return r.json().catch(function () { return null; }).then(function (d) { return { ok: r.ok, data: d }; });
-      }),
-    ])
-      .then(function (results) {
-        var gems = results[0];
-        var sub  = results[1];
-
-        var gemsDisplay = '0';
-        if (gems.ok && gems.data && typeof gems.data === 'object') {
-          gemsDisplay = formatGemBalanceDisplay(gems.data.gem_balance);
-          lastKnownGemBalance = isFinite(Number(gems.data.gem_balance)) ? Number(gems.data.gem_balance) : null;
-          if (gemVal) gemVal.textContent = gemsDisplay;
-          if (gemBadge) {
-            var hasGems = lastKnownGemBalance !== null && lastKnownGemBalance > 0;
-            gemBadge.textContent = hasGems ? t('accountPopup.gemStatus.active') : t('accountPopup.gemStatus.inactive');
-            gemBadge.classList.toggle('acct-badge--active', hasGems);
-            gemBadge.classList.toggle('acct-badge--inactive', !hasGems);
-          }
-          if (gemNext) {
-            if (gems.data.next_deduction_at) {
-              gemNext.textContent = tr('accountPopup.nextDeduction', { date: formatDashboardDate(gems.data.next_deduction_at) });
-              gemNext.classList.remove('hidden');
-            } else {
-              gemNext.textContent = '';
-              gemNext.classList.add('hidden');
-            }
-          }
-        } else {
-          if (gemVal)  gemVal.textContent = '0';
-          if (gemBadge) { gemBadge.textContent = t('accountPopup.gemStatus.inactive'); gemBadge.classList.add('acct-badge--inactive'); gemBadge.classList.remove('acct-badge--active'); }
-          if (gemNext) { gemNext.textContent = ''; gemNext.classList.add('hidden'); }
-        }
-
-        var planDisplay = t('accountPopup.plan.free');
-        if (sub.ok && sub.data && typeof sub.data === 'object' && sub.data.plan_name) {
-          planDisplay = String(sub.data.plan_name);
-          if (planEl) planEl.textContent = planDisplay;
-          if (stEl) {
-            stEl.textContent = String(sub.data.status || '');
-            stEl.classList.toggle('hidden', !sub.data.status);
-          }
-          if (exEl && sub.data.expires_at) {
-            exEl.textContent = tr('accountPopup.renews', { date: formatDashboardDate(sub.data.expires_at) });
-            exEl.classList.remove('hidden');
-          } else if (exEl) {
-            exEl.textContent = '';
-            exEl.classList.add('hidden');
-          }
-          dashboardSubscriptionTier = planDisplay;
-        } else {
-          if (planEl) planEl.textContent = t('accountPopup.plan.free');
-          if (stEl)   { stEl.textContent = ''; stEl.classList.add('hidden'); }
-          if (exEl)   { exEl.textContent = ''; exEl.classList.add('hidden'); }
-          dashboardSubscriptionTier = 'Free';
-        }
-
-        setSidebarBilling(gemsDisplay, planDisplay);
-        updateDashboardAvailabilityUi();
-        if (dashboardLoggedIn) applyAccountPermissions();
-      })
-      .catch(function () {
-        resetBillingUi();
-        dashboardSubscriptionTier = 'Free';
-        updateDashboardAvailabilityUi();
-      });
-  }
-
-  function openPurchaseModal() {
-    var overlay = document.getElementById('purchase-modal-overlay');
-    if (!overlay) { openRealmEnginePaymentPage(); return; }
-
-    // Always start on step 1; collapse any open payment category panels
-    var step1 = document.getElementById('purchase-step-qty');
-    var step2 = document.getElementById('purchase-step-method');
-    if (step1) step1.classList.remove('hidden');
-    if (step2) step2.classList.add('hidden');
-    document.querySelectorAll('.pay-cat-options').forEach(function (p) { p.classList.add('hidden'); });
-    document.querySelectorAll('.pay-cat-row--expand').forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
-
-    var errEl = document.getElementById('purchase-modal-qty-error');
-    if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
-    updatePurchaseModalTotal();
-
-    overlay.classList.remove('hidden');
-    overlay.setAttribute('aria-hidden', 'false');
-    var qty = document.getElementById('purchase-modal-gem-qty');
-    if (qty) { try { qty.focus(); qty.select(); } catch (e) {} }
-  }
-
-  function closePurchaseModal() {
-    var el = document.getElementById('purchase-modal-overlay');
-    if (!el) return;
-    el.classList.add('hidden');
-    el.setAttribute('aria-hidden', 'true');
-  }
-
-  function closePlanModal() {
-    var el = document.getElementById('plan-modal-overlay');
-    if (!el) return;
-    el.classList.add('hidden');
-    el.setAttribute('aria-hidden', 'true');
-  }
-
-  function setPlanModalMsg(text, isError) {
-    var el = document.getElementById('plan-modal-msg');
-    if (!el) return;
-    if (!text) { el.textContent = ''; el.classList.add('hidden'); return; }
-    el.textContent = text;
-    el.className = 'plan-modal-msg' + (isError ? ' plan-modal-msg--error' : ' plan-modal-msg--ok');
-    el.classList.remove('hidden');
-  }
-
-  // Plans are fixed — no need to fetch from the server on modal open.
-  // Only subscriptions (which plans the user has active) are fetched.
-  // Plan prices: paid in gems, deducted monthly from balance (preload model).
-  //   Dodge      = $10/mo =  1,000 G/mo
-  //   Developer  = $20/mo =  2,000 G/mo
-  // Rate: 100 G = $1 USD. See formatUsdFromGemCount.
-  // Subscriptions unlock plugins they gate (auto-loot, auto-pot, etc.) and
-  // discount consumables (potions). They do NOT discount script purchases —
-  // scripts always cost gems at full price regardless of tier.
-  var CLIENT_PLANS = [
-    {
-      name: 'Dodge',
-      price_usd: 10.0,
-      description: 'Advanced dodge automation and survival tooling.',
-      features: [
-        'Autododge (AOE, tracking, speed-aware)',
-        'Godfarming script',
-        'Safe-walk plugin',
-        'Discount on potion purchases',
-      ],
-    },
-    {
-      name: 'Developer',
-      price_usd: 8.0,
-      badge: 'Pro',
-      description: 'Full SDK access and developer tooling.',
-      features: [
-        'RealmEngine SDK bridge access',
-        'Custom plugin development',
-        'Script hosting & management',
-        'Developer API access',
-        'Discount on potion purchases',
-      ],
-    },
-  ];
-
-  function renderPlanModalBody(activeSubs) {
-    var body = document.getElementById('plan-modal-body');
-    if (!body) return;
-    var gemBalance = lastKnownGemBalance;
-
-    // Match active subs by plan name (case-insensitive)
-    var activeSubsByName = {};
-    (activeSubs || []).forEach(function (s) {
-      if (s.plan_name) activeSubsByName[s.plan_name.toLowerCase()] = s;
-    });
-
-    var html = '';
-
-    // Free tier card (always shown)
-    html += '<div class="plan-card plan-card--free">';
-    html += '<div class="plan-card-head"><span class="plan-card-name">Free</span>';
-    html += '<span class="plan-card-price"><span class="plan-card-price-num">0</span><span class="market-gem-label">G</span><span class="plan-card-per">/mo</span></span>';
-    html += '<span class="plan-card-badge plan-card-badge--current">Always included</span></div>';
-    html += '<p class="plan-card-desc">Core bot features — no subscription required.</p>';
-    html += '<ul class="plan-card-features">';
-    html += '<li>Autoaim (smart target filtering)</li>';
-    html += '<li>Autonexus (configurable HP &amp; status thresholds)</li>';
-    html += '<li>Autoloot (potion pickup)</li>';
-    html += '<li>Damage Sniffer</li>';
-    html += '<li>Game Wiki</li>';
-    html += '</ul>';
-    html += '</div>';
-
-    CLIENT_PLANS.forEach(function (plan) {
-      var planNameLower = plan.name.toLowerCase();
-      var gemCost = Math.round(plan.price_usd * 100);
-      var activeSub = activeSubsByName[planNameLower];
-      var isActive = !!activeSub;
-
-      var dollarStr = '$' + (plan.price_usd % 1 === 0 ? plan.price_usd.toFixed(0) : plan.price_usd.toFixed(2));
-
-      html += '<div class="plan-card' + (isActive ? ' plan-card--active' : '') + (plan.badge ? ' plan-card--highlight' : '') + '">';
-      html += '<div class="plan-card-head">';
-      html += '<span class="plan-card-name">' + escapeHtml(plan.name) + '</span>';
-      html += '<span class="plan-card-price"><span class="plan-card-price-num">' + gemCost + '</span><span class="market-gem-label">G</span><span class="plan-card-per">/mo</span></span>';
-      if (isActive) {
-        html += '<span class="plan-card-badge plan-card-badge--active">Active</span>';
-      } else if (plan.badge) {
-        html += '<span class="plan-card-badge plan-card-badge--highlight">' + escapeHtml(plan.badge) + '</span>';
-      }
-      html += '</div>';
-
-      html += '<p class="plan-card-desc">' + escapeHtml(plan.description) + ' <em>' + dollarStr + '/mo</em></p>';
-      if (plan.features && plan.features.length) {
-        html += '<ul class="plan-card-features">';
-        plan.features.forEach(function (f) { html += '<li>' + escapeHtml(f) + '</li>'; });
-        html += '</ul>';
-      }
-
-      if (isActive) {
-        var expires = activeSub.expires_at ? new Date(activeSub.expires_at).toLocaleDateString() : '—';
-        var autopay = activeSub.autopay;
-        html += '<div class="plan-card-status-row">';
-        html += '<span class="plan-card-expires">Active until ' + escapeHtml(expires) + '</span>';
-        if (autopay) {
-          html += '<button type="button" class="plan-card-cancel-btn" data-cancel-sub-id="' + escapeHtml(activeSub.id) + '">Cancel autopay</button>';
-        } else {
-          html += '<span class="plan-card-no-autopay">Autopay off — expires ' + escapeHtml(expires) + '</span>';
-        }
-        html += '</div>';
-      } else {
-        var canAfford = gemBalance !== null && gemBalance >= gemCost;
-        var insufficientNote = (gemBalance !== null && !canAfford)
-          ? ' <span class="plan-card-afford-note">Need ' + gemCost + '<span class="market-gem-label">G</span> (you have ' + Math.floor(gemBalance) + '<span class="market-gem-label">G</span>)</span>'
-          : '';
-        html += '<button type="button" class="plan-card-buy-btn setting-btn'
-          + (canAfford ? '' : ' plan-card-buy-btn--low')
-          + '" data-buy-plan-name="' + escapeHtml(plan.name) + '" data-buy-gem-cost="' + gemCost + '">'
-          + 'Subscribe · ' + gemCost + '<span class="market-gem-label">G</span>/mo</button>' + insufficientNote;
-      }
-
-      html += '</div>';
-    });
-
-    body.innerHTML = html;
-
-    // Wire buy buttons — plan name is stored; ID is lazily resolved on click
-    body.querySelectorAll('[data-buy-plan-name]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var planName = btn.getAttribute('data-buy-plan-name');
-        var cost = parseInt(btn.getAttribute('data-buy-gem-cost') || '0', 10);
-        doPlanGemPurchase(planName, cost);
-      });
-    });
-
-    // Wire cancel buttons
-    body.querySelectorAll('[data-cancel-sub-id]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var subId = btn.getAttribute('data-cancel-sub-id');
-        doCancelAutopay(subId);
-      });
-    });
-  }
-
-  function fetchActiveSubs() {
-    if (!dashboardLoggedIn || !accessToken) return Promise.resolve([]);
-    return fetch('/api/payments/subscriptions', {
-      headers: { Authorization: 'Bearer ' + accessToken },
-    }).then(function (r) { return r.json().catch(function () { return []; }); });
-  }
-
-  function openPlanModal() {
-    var overlay = document.getElementById('plan-modal-overlay');
-    if (!overlay) { openRealmEnginePaymentPage(); return; }
-
-    var body = document.getElementById('plan-modal-body');
-    setPlanModalMsg('', false);
-
-    overlay.classList.remove('hidden');
-    overlay.setAttribute('aria-hidden', 'false');
-
-    if (!dashboardLoggedIn || !accessToken) {
-      if (body) body.innerHTML = '<p class="plan-modal-loading">Sign in to manage your plan.</p>';
-      return;
-    }
-
-    // Show plan cards immediately with hardcoded plans; subscriptions load fast
-    renderPlanModalBody([]);
-    fetchActiveSubs().then(function (subs) {
-      renderPlanModalBody(subs);
-    }).catch(function () {
-      if (body) body.innerHTML = '<p class="plan-modal-loading">Failed to load subscription status.</p>';
-    });
-  }
-
-  function doPlanGemPurchase(planName, gemCost) {
-    if (!dashboardLoggedIn || !accessToken) {
-      setPlanModalMsg('You must be signed in to purchase.', true);
-      return;
-    }
-    setPlanModalMsg('Processing…', false);
-    var headers = { Authorization: 'Bearer ' + accessToken };
-    // Lazily fetch plan list only now (to get the server-side UUID for this plan name)
-    fetch('/api/payments/plans', { headers: headers })
-      .then(function (r) { return r.json().catch(function () { return []; }); })
-      .then(function (plans) {
-        var match = (plans || []).find(function (p) {
-          return p.name && p.name.toLowerCase() === (planName || '').toLowerCase();
-        });
-        if (!match) {
-          setPlanModalMsg('Plan not found on server. Contact support.', true);
-          return;
-        }
-        return fetch('/api/payments/subscription/gem-purchase', {
-          method: 'POST',
-          headers: Object.assign({}, headers, { 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ plan_id: match.id }),
-        })
-          .then(function (r) {
-            return r.json().then(function (d) { return { ok: r.ok, data: d }; });
-          })
-          .then(function (result) {
-            if (!result.ok) {
-              setPlanModalMsg(result.data.detail || 'Purchase failed.', true);
-              return;
-            }
-            var charged = result.data.gems_charged;
-            var newBal = result.data.gem_balance_after;
-            setPlanModalMsg('Subscribed! Charged ' + charged + 'G. New balance: ' + Math.floor(newBal) + 'G.', false);
-            refreshAccountBillingFromApi();
-            fetchActiveSubs().then(function (subs) { renderPlanModalBody(subs); });
-          });
-      })
-      .catch(function () {
-        setPlanModalMsg('Network error. Try again.', true);
-      });
-  }
-
-  function doCancelAutopay(subscriptionId) {
-    if (!dashboardLoggedIn || !accessToken) return;
-    setPlanModalMsg('', false);
-    fetch('/api/payments/subscription/' + encodeURIComponent(subscriptionId) + '/cancel-autopay', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + accessToken },
-    })
-      .then(function (r) {
-        return r.json().then(function (d) { return { ok: r.ok, data: d }; });
-      })
-      .then(function (result) {
-        if (!result.ok) {
-          setPlanModalMsg(result.data.detail || 'Failed to cancel autopay.', true);
-          return;
-        }
-        var expires = result.data.expires_at ? new Date(result.data.expires_at).toLocaleDateString() : '—';
-        setPlanModalMsg('Autopay cancelled. Plan stays active until ' + expires + '.', false);
-        fetchActiveSubs().then(function (subs) { renderPlanModalBody(subs); });
-      })
-      .catch(function () {
-        setPlanModalMsg('Network error. Try again.', true);
-      });
-  }
-
   function renderAccountSettings() {
     var emailEl = document.getElementById('account-popup-email');
     var memberEl = document.getElementById('account-popup-member-since');
@@ -1355,7 +791,6 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
       memberEl.textContent =
         dashboardUser && dashboardUser.created_at ? formatDashboardDate(dashboardUser.created_at) : '—';
     }
-    refreshAccountBillingFromApi();
   }
 
   /* ── Account popup open / close ──
@@ -1451,7 +886,6 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
     // Re-render the tabs whose UI depends on plan/admin state.
     if (typeof renderPlugins === 'function' && Array.isArray(allPluginsData)) renderPlugins(allPluginsData);
     if (typeof renderHomeTab === 'function') renderHomeTab();
-    if (typeof renderPremiumTab === 'function') renderPremiumTab();
     // applyAdminMode handles the admin-only tab visibility + packet sniffer.
     applyPacketSnifferVisibility();
   }
@@ -2161,16 +1595,6 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeSettingsPopout();
-  });
-
-  (function relocateSettingsAndAccountIntoTab() {
-    var tabAccount = document.getElementById('settings-tab-account');
-    var tabForm = document.getElementById('settings-tab-form');
-    if (!tabAccount || !tabForm) return;
-
-    // Move the account-popup body (profile card, gem/plan stats, action
-    // buttons, sign out) into the Settings tab. We strip the wrapper "popup"
-    // chrome so it lays out as an inline section.
     var acctOverlay = document.getElementById('account-popup-overlay');
     if (acctOverlay) {
       var acctBody = acctOverlay.querySelector('.account-popup-body');
@@ -2246,136 +1670,14 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
     }
   });
 
-  /* ── Sidebar account button → open account popup ── */
-  var sidebarAccountBtn = document.getElementById('sidebar-account-btn');
-  if (sidebarAccountBtn) {
-    sidebarAccountBtn.addEventListener('click', function () { openAccountPopup(); });
-  }
-  var multiAccountBtn = document.getElementById('multi-account-account-btn');
-  if (multiAccountBtn) {
-    multiAccountBtn.addEventListener('click', function () { openAccountPopup(); });
-  }
-
-  /* ── Account popup: close, buy-gems, manage-plan, sign-out ── */
   var accountPopupOverlay = document.getElementById('account-popup-overlay');
   if (accountPopupOverlay) {
     accountPopupOverlay.addEventListener('click', function (e) {
       if (e.target.closest('[data-account-popup-close]')) closeAccountPopup();
     });
   }
-  var acctPopupBuyGems = document.getElementById('account-popup-buy-gems');
-  var acctPopupManagePlan = document.getElementById('account-popup-manage-plan');
-  var acctPopupSignout = document.getElementById('account-popup-signout');
-  if (acctPopupBuyGems) {
-    acctPopupBuyGems.addEventListener('click', function () { closeAccountPopup(); openPurchaseModal(); });
-  }
-  if (acctPopupManagePlan) {
-    acctPopupManagePlan.addEventListener('click', function () { closeAccountPopup(); openPlanModal(); });
-  }
-  if (acctPopupSignout) {
-    acctPopupSignout.addEventListener('click', function () { signOutDashboard(); });
-  }
-
-  var planModalOverlay = document.getElementById('plan-modal-overlay');
-  if (planModalOverlay) {
-    planModalOverlay.addEventListener('click', function (e) {
-      if (e.target.closest('[data-plan-modal-close]')) closePlanModal();
-    });
-  }
-
-  var purchaseModalOverlay = document.getElementById('purchase-modal-overlay');
-  if (purchaseModalOverlay) {
-    purchaseModalOverlay.addEventListener('click', function (e) {
-      if (e.target.closest('[data-purchase-modal-close]')) closePurchaseModal();
-    });
-  }
-  var purchaseModalGemQty = document.getElementById('purchase-modal-gem-qty');
-  if (purchaseModalGemQty) {
-    function sanitizePurchaseGemQtyInput() {
-      var el = purchaseModalGemQty;
-      var digits = String(el.value).replace(/\D/g, '').slice(0, 6);
-      if (el.value !== digits) el.value = digits;
-      updatePurchaseModalTotal();
-    }
-    purchaseModalGemQty.addEventListener('input', sanitizePurchaseGemQtyInput);
-    purchaseModalGemQty.addEventListener('change', sanitizePurchaseGemQtyInput);
-    purchaseModalGemQty.addEventListener('keydown', function (e) {
-      if (e.key !== 'Enter') return;
-      e.preventDefault();
-      purchaseModalCheckout();
-    });
-  }
-  var purchaseModalCheckoutBtn = document.getElementById('purchase-modal-checkout');
-  if (purchaseModalCheckoutBtn) {
-    purchaseModalCheckoutBtn.addEventListener('click', function () {
-      purchaseModalCheckout();
-    });
-  }
-
-  // Quick-amount buttons
-  document.querySelectorAll('.purchase-quick-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var qty = document.getElementById('purchase-modal-gem-qty');
-      if (qty) {
-        qty.value = String(btn.getAttribute('data-quick-gems') || '100');
-        updatePurchaseModalTotal();
-      }
-    });
-  });
-
-  // Step 2: back button
-  var purchaseBackBtn = document.getElementById('purchase-modal-back');
-  if (purchaseBackBtn) {
-    purchaseBackBtn.addEventListener('click', purchaseGoBack);
-  }
-
-  // Step 2: category row expand/collapse
-  document.querySelectorAll('.pay-cat-row--expand').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var targetId = 'pay-expand-' + (btn.getAttribute('data-expand') || '');
-      var panel = document.getElementById(targetId);
-      if (!panel) return;
-      var isOpen = !panel.classList.contains('hidden');
-      // Close all other panels first
-      document.querySelectorAll('.pay-cat-options').forEach(function (p) { p.classList.add('hidden'); });
-      document.querySelectorAll('.pay-cat-row--expand').forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
-      if (!isOpen) {
-        panel.classList.remove('hidden');
-        btn.setAttribute('aria-expanded', 'true');
-      }
-    });
-  });
-
-  // Step 2: direct card row
-  var stripeCardRow = document.querySelector('[data-method="stripe_card"]');
-  if (stripeCardRow) {
-    stripeCardRow.addEventListener('click', function () {
-      purchaseWithMethod('stripe_card');
-    });
-  }
-
-  // Step 2: individual option buttons inside expanded panels
-  document.querySelectorAll('.pay-opt-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var method = btn.getAttribute('data-method') || '';
-      purchaseWithMethod(method);
-    });
-  });
-
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
-    var pl = document.getElementById('plan-modal-overlay');
-    if (pl && !pl.classList.contains('hidden')) {
-      e.preventDefault();
-      closePlanModal();
-      return;
-    }
-    var pm = document.getElementById('purchase-modal-overlay');
-    if (pm && !pm.classList.contains('hidden')) {
-      e.preventDefault();
-      closePurchaseModal();
-      return;
-    }
     var ap = document.getElementById('account-popup-overlay');
     if (ap && !ap.classList.contains('hidden')) {
       e.preventDefault();
@@ -2562,275 +1864,6 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
       ws.send(JSON.stringify({ type: 'updateSetting', pluginId: action.pluginId, key: action.key, value: true }));
     }
   });
-
-  function setOverlayLoginError(text) {
-    if (!overlayLoginError) return;
-    overlayLoginError.textContent = text || '';
-    overlayLoginError.classList.toggle('hidden', !text);
-  }
-
-  function setOverlayPasswordEyeIcons(passwordVisible) {
-    if (!overlayPasswordToggleBtn) return;
-    var showIcon = overlayPasswordToggleBtn.querySelector('.disconnect-password-eye-show');
-    var hideIcon = overlayPasswordToggleBtn.querySelector('.disconnect-password-eye-hide');
-    if (showIcon) showIcon.classList.toggle('hidden', passwordVisible);
-    if (hideIcon) hideIcon.classList.toggle('hidden', !passwordVisible);
-  }
-
-  function resetOverlayPasswordVisibility() {
-    if (overlayPasswordInput) overlayPasswordInput.type = 'password';
-    if (overlayPasswordToggleBtn) {
-      overlayPasswordToggleBtn.setAttribute('aria-pressed', 'false');
-      overlayPasswordToggleBtn.setAttribute('aria-label', 'Show password');
-      overlayPasswordToggleBtn.title = 'Show password';
-    }
-    setOverlayPasswordEyeIcons(false);
-  }
-
-  if (overlayPasswordToggleBtn && overlayPasswordInput) {
-    overlayPasswordToggleBtn.addEventListener('click', function () {
-      var showPlain = overlayPasswordInput.type === 'password';
-      overlayPasswordInput.type = showPlain ? 'text' : 'password';
-      overlayPasswordToggleBtn.setAttribute('aria-pressed', showPlain ? 'true' : 'false');
-      overlayPasswordToggleBtn.setAttribute('aria-label', showPlain ? 'Hide password' : 'Show password');
-      overlayPasswordToggleBtn.title = showPlain ? 'Hide password' : 'Show password';
-      setOverlayPasswordEyeIcons(showPlain);
-    });
-  }
-
-  function persistDashboardLoginState() {
-    if (accessToken) localStorage.setItem('accessToken', accessToken);
-    else localStorage.removeItem('accessToken');
-    if (refreshToken) localStorage.setItem('refreshToken', refreshToken);
-    else localStorage.removeItem('refreshToken');
-    localStorage.removeItem('dashboardLoggedIn');
-    localStorage.removeItem('dashboardUsername');
-    localStorage.removeItem('dashboardPassword');
-    renderAccountSettings();
-  }
-
-  function clearAuthLocalState() {
-    accessToken = null;
-    refreshToken = null;
-    dashboardUser = null;
-    dashboardLoggedIn = false;
-    dashboardSubscriptionTier = 'Free';
-    adminMode = false;
-    singleClientOnly = true;
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('dashboardLoggedIn');
-    localStorage.removeItem('dashboardUsername');
-    localStorage.removeItem('dashboardPassword');
-  }
-
-  function finishSignOutUi() {
-    setOverlayLoginError('');
-    if (overlayEmailInput) overlayEmailInput.value = localStorage.getItem('lastLoginEmail') || '';
-    if (overlayPasswordInput) overlayPasswordInput.value = '';
-    resetOverlayPasswordVisibility();
-    if (disconnectOverlay) disconnectOverlay.setAttribute('data-mode', 'signin');
-    var sub = document.getElementById('disconnect-auth-subtitle');
-    if (sub) sub.textContent = 'Sign in to your account';
-    if (settingsOverlay) settingsOverlay.classList.add('hidden');
-    renderAccountSettings();
-    updateDashboardAvailabilityUi();
-    applyAccountPermissions();
-  }
-
-  function authErrorDetail(data, fallback) {
-    var d = data && data.detail;
-    if (typeof d === 'string') return d;
-    if (Array.isArray(d) && d.length && d[0] && d[0].msg) return String(d[0].msg);
-    if (data && typeof data.error === 'string') return data.error;
-    if (data && typeof data.message === 'string') return data.message;
-    return fallback || 'The auth server did not return an error message.';
-  }
-
-  function fetchAuthWithTimeout(url, options, timeoutMs, timeoutMessage) {
-    var controller = new AbortController();
-    var timer = setTimeout(function () {
-      try { controller.abort(); } catch (_e) {}
-    }, timeoutMs || 15000);
-    var opts = Object.assign({}, options || {}, { signal: controller.signal });
-    return fetch(url, opts)
-      .catch(function (err) {
-        if (err && err.name === 'AbortError') {
-          throw new Error(timeoutMessage || 'Auth request timed out. Restart dev mode if this keeps happening.');
-        }
-        throw err;
-      })
-      .finally(function () {
-        clearTimeout(timer);
-      });
-  }
-
-
-  function tryRefreshToken() {
-    if (!refreshToken) return Promise.resolve(false);
-    return fetchAuthWithTimeout('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    }, 15000, 'Session refresh timed out. Please sign in again.')
-      .then(function (r) {
-        return r.json().catch(function () { return {}; }).then(function (data) {
-          if (!r.ok) return false;
-          if (data.access_token) accessToken = data.access_token;
-          if (data.refresh_token) refreshToken = data.refresh_token;
-          persistDashboardLoginState();
-          return true;
-        });
-      })
-      .catch(function () {
-        return false;
-      });
-  }
-
-  function fetchCurrentUser(allowRefreshRetry) {
-    if (!accessToken) {
-      return Promise.reject(new Error('No token'));
-    }
-    return fetchAuthWithTimeout('/api/auth/me', {
-      headers: { Authorization: 'Bearer ' + accessToken },
-    }, 15000, 'Profile lookup timed out. Restart dev mode if this keeps happening.')
-      .then(function (r) {
-        return r.text().then(function (text) {
-          var data = {};
-          try {
-            data = text ? JSON.parse(text) : {};
-          } catch (e) {
-            data = {};
-          }
-          if (r.status === 401 && allowRefreshRetry !== false && refreshToken) {
-            return tryRefreshToken().then(function (ok) {
-              if (ok) return fetchCurrentUser(false);
-              clearAuthLocalState();
-              finishSignOutUi();
-              return Promise.reject(new Error('Session expired'));
-            });
-          }
-          if (!r.ok) {
-            var msg = authErrorDetail(data, 'Could not load your account profile.');
-            if (r.status === 401) {
-              clearAuthLocalState();
-              finishSignOutUi();
-            }
-            throw new Error(msg);
-          }
-          return data;
-        });
-      })
-      .then(function (profile) {
-        // Admin dev: force is_admin true so the toggle is always enabled.
-        profile.is_admin = true;
-        dashboardUser = profile;
-        dashboardLoggedIn = true;
-        persistDashboardLoginState();
-        updateDashboardAvailabilityUi();
-        renderAccountSettings();
-        // Fetch billing first so dashboardSubscriptionTier is set before applying permissions
-        refreshAccountBillingFromApi();
-        applyAccountPermissions();
-        return profile;
-      });
-  }
-
-  /**
-   * Apply UI permissions based on the authenticated account.
-   * - Admins: enable admin mode, can toggle single-client
-   * - Non-admins: force adminMode=false, singleClientOnly=true, lock both
-   * - Basic tier (or higher): show developer settings tab
-   * - Free tier: hide developer settings tab
-   * Called after every successful login/profile fetch.
-   */
-  function applyAccountPermissions() {
-    var isAdmin = !!(dashboardUser && dashboardUser.is_admin);
-    var tier = (dashboardSubscriptionTier || 'Free').toLowerCase();
-    var hasDeveloper = tier === 'premium' || tier === 'basic' || tier === 'developer';
-
-    // Admin dev: adminMode not forced off for non-admins — let the toggle control it.
-    _realAdminMode = adminMode;  // capture real state for view-as override resets
-
-    // If a non-admin somehow has a view-as override active, drop it.
-    if (!isAdmin && viewAsOverride) {
-      viewAsOverride = null;
-      var vSel = document.getElementById('setting-view-as');
-      if (vSel) vSel.value = '';
-    }
-
-    applyAdminMode();
-
-    // Lock singleClientOnly to true for non-admins
-    if (!isAdmin) {
-      singleClientOnly = true;
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: 'updateSingleClientOnly', value: true }));
-      }
-    }
-    if (singleClientOnlyToggle) {
-      singleClientOnlyToggle.checked = singleClientOnly;
-      singleClientOnlyToggle.disabled = !isAdmin;
-      var scoRow = singleClientOnlyToggle.closest('.settings-row');
-      if (scoRow) scoRow.classList.toggle('settings-row--locked', !isAdmin);
-    }
-
-    // Developer settings tab: only for Developer-tier or admins
-    var devSettingsTab = document.getElementById('settings-tab-developer');
-    if (devSettingsTab) {
-      devSettingsTab.classList.toggle('hidden', !hasDeveloper && !isAdmin);
-    }
-
-    // Admin settings tab: only for admins
-    var adminSettingsTab = document.getElementById('settings-tab-admin');
-    if (adminSettingsTab) {
-      adminSettingsTab.classList.toggle('hidden', !isAdmin);
-    }
-
-    // Fall back active settings tab if no longer accessible
-    if (!hasDeveloper && !isAdmin && activeSettingsTab === 'developer') {
-      setActiveSettingsTab('visual');
-    }
-    if (!isAdmin && activeSettingsTab === 'admin') {
-      setActiveSettingsTab('visual');
-    }
-
-    // Send tokens to DevServer so plugins use the same session (no separate login)
-    if (accessToken && ws && ws.readyState === 1) {
-      ws.send(JSON.stringify({
-        type: 'dashboardToken',
-        access_token: accessToken,
-        refresh_token: refreshToken || null,
-        is_admin: !!(dashboardUser && dashboardUser.is_admin),
-        developer_mode: !!(dashboardUser && dashboardUser.developer_mode),
-      }));
-    }
-  }
-
-  function restoreDashboardSessionFromTokens() {
-    if (!accessToken) return Promise.resolve(false);
-    return fetchCurrentUser(true).then(function () { return true; }).catch(function () { return false; });
-  }
-
-  function signOutDashboard() {
-    var tok = accessToken;
-    if (tok) {
-      fetch('/api/auth/signout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer ' + tok,
-        },
-      }).finally(function () {
-        clearAuthLocalState();
-        finishSignOutUi();
-      });
-    } else {
-      clearAuthLocalState();
-      finishSignOutUi();
-    }
-  }
-
 
   function openDashboardTab(tabName) {
     var btn = document.querySelector('.content-tab[data-tab="' + String(tabName) + '"]');
@@ -7741,11 +6774,7 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
       return name.indexOf(q) >= 0 || rawName.indexOf(q) >= 0 || id.indexOf(q) >= 0;
     });
 
-    var _isAdmin = document.body.classList.contains('admin-mode');
     filtered.sort(function (a, b) {
-      var aLocked = !_isAdmin && (a.source === 'bundled' && a.requiredPlan && !activePlanNames.has(String(a.requiredPlan).toLowerCase())) ? 1 : 0;
-      var bLocked = !_isAdmin && (b.source === 'bundled' && b.requiredPlan && !activePlanNames.has(String(b.requiredPlan).toLowerCase())) ? 1 : 0;
-      if (aLocked !== bLocked) return aLocked - bLocked;
       return getPluginDisplayName(a).localeCompare(getPluginDisplayName(b));
     });
 
@@ -7766,26 +6795,15 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
     }
 
     filtered.forEach(function (p) {
-      var isLocked = !_isAdmin && p.source === 'bundled' && p.requiredPlan && !activePlanNames.has(String(p.requiredPlan).toLowerCase());
       var item = document.createElement('div');
-      item.className = 'plugin-sidebar-item' + (p.enabled ? '' : ' disabled') + (isLocked ? ' plugin-sidebar-item--locked' : '');
+      item.className = 'plugin-sidebar-item' + (p.enabled ? '' : ' disabled');
       item.setAttribute('data-plugin-id', p.id);
 
       var nameSpan = document.createElement('span');
       nameSpan.className = 'plugin-sidebar-item-name';
       nameSpan.textContent = getPluginDisplayName(p);
 
-      if (isLocked) {
-        var planDisplay = String(p.requiredPlan).charAt(0).toUpperCase() + String(p.requiredPlan).slice(1);
-        var lockBadge = document.createElement('span');
-        lockBadge.className = 'plugin-sidebar-plan-badge';
-        lockBadge.textContent = planDisplay;
-        lockBadge.title = 'Requires ' + planDisplay + ' plan';
         item.appendChild(nameSpan);
-        item.appendChild(lockBadge);
-      } else {
-        item.appendChild(nameSpan);
-      }
 
       var sidebarWarn = pluginFirstWarning(p);
       if (sidebarWarn) {
@@ -7800,25 +6818,22 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
       var toggleLabel = document.createElement('label');
       toggleLabel.className = 'toggle-switch toggle-switch-sm';
       toggleLabel.innerHTML =
-        '<input type="checkbox" ' + (p.enabled ? 'checked' : '') + (isLocked ? ' disabled' : '') + '>' +
+        '<input type="checkbox" ' + (p.enabled ? 'checked' : '') + '>' +
         '<span class="toggle-slider"></span>';
       var cb = toggleLabel.querySelector('input');
-      if (!isLocked) {
-        cb.addEventListener('change', function (e) {
-          e.stopPropagation();
-          if (!ws || ws.readyState !== 1) return;
-          ws.send(JSON.stringify({
-            type: 'togglePlugin',
-            pluginId: p.id,
-            enabled: cb.checked,
-          }));
-        });
-      }
+      cb.addEventListener('change', function (e) {
+        e.stopPropagation();
+        if (!ws || ws.readyState !== 1) return;
+        ws.send(JSON.stringify({
+          type: 'togglePlugin',
+          pluginId: p.id,
+          enabled: cb.checked,
+        }));
+      });
       toggleLabel.addEventListener('click', function (e) { e.stopPropagation(); });
 
       item.addEventListener('click', function (e) {
         if (e.target.closest('.toggle-switch')) return;
-        if (isLocked) { openPlanModal(); return; }
         jumpToPluginInHub(p.id);
       });
 
@@ -9822,7 +8837,6 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
       });
     }
     if (tabName === 'home') renderHomeTab();
-    if (tabName === 'premium') renderPremiumTab();
     if (tabName === 'settings') refreshSettingsTab();
     if (tabName === 'accounts') renderAccountsTab();
     if (tabName === 'damage') renderDamageTab();
@@ -12994,188 +12008,6 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
       });
   }
 
-  function renderAccountsOverview() {
-    if (!accountsOverviewSummaryEl || !accountsOverviewStatusEl || !accountsCharactersListEl || !accountsCharactersEmptyEl || !accountsCharacterDetailEl) return;
-    var account = getSelectedDashboardAccount();
-    var overview = getSelectedDashboardAccountOverview();
-    var loading = !!account && accountOverviewLoadingId === account.id;
-    var notice = account ? accountOverviewNoticeById[account.id] : null;
-
-    if (accountsOverviewRefreshBtn) {
-      accountsOverviewRefreshBtn.disabled = accountsRefreshAllLoading || !account || loading || !String(account.email || '').trim() || !String(account.password || '');
-      accountsOverviewRefreshBtn.textContent = loading ? 'Loading...' : 'Refresh Characters';
-    }
-    if (accountsOverviewRefreshAllBtn) {
-      accountsOverviewRefreshAllBtn.disabled = accountsRefreshAllLoading || !dashboardAccounts.some(function (entry) {
-        return String(entry.email || '').trim() && String(entry.password || '');
-      });
-      accountsOverviewRefreshAllBtn.textContent = accountsRefreshAllLoading ? 'Refreshing...' : 'Refresh All';
-    }
-
-    if (!account) {
-      accountsOverviewSummaryEl.textContent = 'Select an account to inspect its characters.';
-      accountsOverviewStatusEl.textContent = '';
-      accountsOverviewStatusEl.classList.remove('error');
-      accountsCharactersListEl.innerHTML = '';
-      accountsCharactersEmptyEl.style.display = '';
-      accountsCharactersEmptyEl.textContent = 'No account selected.';
-      accountsCharacterDetailEl.innerHTML = '<div class="accounts-character-placeholder">Select an account to inspect its equipment and stats.</div>';
-      return;
-    }
-
-    if (notice) {
-      accountsOverviewStatusEl.textContent = String(notice.text || '');
-      accountsOverviewStatusEl.classList.toggle('error', !!notice.isError);
-    } else {
-      accountsOverviewStatusEl.textContent = '';
-      accountsOverviewStatusEl.classList.remove('error');
-    }
-
-    if (!String(account.email || '').trim() || !String(account.password || '')) {
-      accountsOverviewSummaryEl.textContent = 'Enter email and password, then refresh to load characters.';
-      accountsCharactersListEl.innerHTML = '';
-      accountsCharactersEmptyEl.style.display = '';
-      accountsCharactersEmptyEl.textContent = 'This account is missing login credentials.';
-      accountsCharacterDetailEl.innerHTML = '<div class="accounts-character-placeholder">Character data requires valid account credentials.</div>';
-      return;
-    }
-
-    if (!overview) {
-      accountsOverviewSummaryEl.textContent = loading ? 'Loading character list...' : 'Character list not loaded yet.';
-      accountsCharactersListEl.innerHTML = '';
-      accountsCharactersEmptyEl.style.display = '';
-      accountsCharactersEmptyEl.textContent = loading ? 'Loading characters...' : 'Click Refresh Characters to load this account.';
-      accountsCharacterDetailEl.innerHTML = '<div class="accounts-character-placeholder">' + (loading ? 'Fetching character data from RotMG...' : 'Load the character list to inspect equipment and stats.') + '</div>';
-      return;
-    }
-
-    var summaryParts = [];
-    summaryParts.push(String(overview.accountName || account.label || account.email || 'Account'));
-    summaryParts.push(String((overview.characters || []).length) + ' chars');
-    if (Number(overview.aliveFame) > 0) summaryParts.push('Total alive fame ' + String(overview.aliveFame));
-    if (Number(overview.bestCharFame) > 0) summaryParts.push('Best char ' + String(overview.bestCharFame));
-    if (notice && !notice.isError) {
-      var updatedAt = formatAccountOverviewTimestamp(notice.updatedAt);
-      if (updatedAt) summaryParts.push('Updated ' + updatedAt);
-    }
-    accountsOverviewSummaryEl.textContent = summaryParts.join(' • ');
-
-    var characters = Array.isArray(overview.characters) ? overview.characters : [];
-    accountsCharactersListEl.innerHTML = '';
-    if (!characters.length) {
-      accountsCharactersEmptyEl.style.display = '';
-      accountsCharactersEmptyEl.textContent = 'This account has no characters.';
-      accountsCharacterDetailEl.innerHTML = '<div class="accounts-character-placeholder">This account did not return any characters.</div>';
-      return;
-    }
-
-    accountsCharactersEmptyEl.style.display = 'none';
-    var selectedCharacterId = Number(selectedAccountCharacterIdByAccountId[account.id]);
-    var selectedCharacter = null;
-    characters.forEach(function (character) {
-      if (!selectedCharacter && Number(character.charId) === selectedCharacterId) selectedCharacter = character;
-    });
-    if (!selectedCharacter) {
-      selectedCharacter = characters[0];
-      selectedAccountCharacterIdByAccountId[account.id] = selectedCharacter ? Number(selectedCharacter.charId) : null;
-    }
-
-    characters.forEach(function (character) {
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'account-character-card' + (selectedCharacter && Number(selectedCharacter.charId) === Number(character.charId) ? ' selected' : '');
-      var badges = [];
-      badges.push('Lvl ' + String(character.level || 0));
-      if (character.seasonal) badges.push('Seasonal');
-      if (character.dead) badges.push('Dead');
-      btn.innerHTML =
-        '<div class="account-character-card-top">' +
-          '<span class="account-character-card-name">' + escapeHtml(String(character.className || character.classTypeHex || 'Character')) + '</span>' +
-          '<span class="account-character-card-badge">' + escapeHtml(badges.join(' • ')) + '</span>' +
-        '</div>' +
-        '<div class="account-character-card-meta">' +
-          '<span>Fame ' + escapeHtml(String(character.fame || 0)) + '</span>' +
-          '<span>HP ' + escapeHtml(String(character.hp || 0)) + '/' + escapeHtml(String(character.maxHp || 0)) + '</span>' +
-          '<span>ID ' + escapeHtml(String(character.charId || 0)) + '</span>' +
-        '</div>' +
-        '<div class="account-character-card-equipment">' + buildEquipmentSpriteStripHtml(character.equipment) + '</div>';
-      btn.addEventListener('click', function () {
-        selectedAccountCharacterIdByAccountId[account.id] = Number(character.charId);
-        renderAccountsOverview();
-      });
-      accountsCharactersListEl.appendChild(btn);
-    });
-
-    if (!selectedCharacter) {
-      accountsCharacterDetailEl.innerHTML = '<div class="accounts-character-placeholder">Select a character to inspect its equipment and stats.</div>';
-      return;
-    }
-
-    var slotLabels = ['Weapon', 'Ability', 'Armor', 'Ring'];
-    var equipmentHtml = '';
-    (selectedCharacter.equipment || []).forEach(function (item, index) {
-      var isEmpty = !item || Number(item.objectType) < 0;
-      equipmentHtml +=
-        '<div class="accounts-equipment-slot">' +
-          '<div class="accounts-equipment-label">' + escapeHtml(slotLabels[index] || ('Slot ' + String(index + 1))) + '</div>' +
-          '<div class="accounts-equipment-visual">' + buildItemSpriteHtml(item) + '</div>' +
-          (isEmpty ? '<div class="accounts-equipment-empty-note">Empty</div>' : '') +
-        '</div>';
-    });
-
-    var stats = [
-      { label: 'HP', value: String(selectedCharacter.hp || 0) + ' / ' + String(selectedCharacter.maxHp || 0) },
-      { label: 'MP', value: String(selectedCharacter.mp || 0) + ' / ' + String(selectedCharacter.maxMp || 0) },
-      { label: 'Fame', value: String(selectedCharacter.fame || 0) },
-      { label: 'Exp', value: String(selectedCharacter.exp || 0) },
-      { label: 'Attack', value: String(selectedCharacter.attack || 0) },
-      { label: 'Defense', value: String(selectedCharacter.defense || 0) },
-      { label: 'Speed', value: String(selectedCharacter.speed || 0) },
-      { label: 'Dexterity', value: String(selectedCharacter.dexterity || 0) },
-      { label: 'Vitality', value: String(selectedCharacter.vitality || 0) },
-      { label: 'Wisdom', value: String(selectedCharacter.wisdom || 0) },
-    ];
-    var statsHtml = stats.map(function (stat) {
-      return (
-        '<div class="accounts-stat-tile">' +
-          '<div class="accounts-stat-label">' + escapeHtml(stat.label) + '</div>' +
-          '<div class="accounts-stat-value">' + escapeHtml(stat.value) + '</div>' +
-        '</div>'
-      );
-    }).join('');
-    var inventoryHtml = buildInventorySpriteStripHtml(selectedCharacter.inventory, selectedCharacter.backpacks);
-
-    var pills = [
-      '<span class="accounts-character-pill">Level ' + escapeHtml(String(selectedCharacter.level || 0)) + '</span>',
-      '<span class="accounts-character-pill">Fame ' + escapeHtml(String(selectedCharacter.fame || 0)) + '</span>',
-      '<span class="accounts-character-pill">Char ID ' + escapeHtml(String(selectedCharacter.charId || 0)) + '</span>',
-    ];
-    if (selectedCharacter.seasonal) pills.push('<span class="accounts-character-pill">Seasonal</span>');
-    if (selectedCharacter.dead) pills.push('<span class="accounts-character-pill warn">Dead</span>');
-
-    accountsCharacterDetailEl.innerHTML =
-      '<div class="accounts-character-header">' +
-        '<div>' +
-          '<div class="accounts-character-title">' + escapeHtml(String(selectedCharacter.className || selectedCharacter.classTypeHex || 'Character')) + '</div>' +
-          '<div class="accounts-character-subtitle">Type ' + escapeHtml(String(selectedCharacter.classTypeHex || '')) + '</div>' +
-        '</div>' +
-        '<div class="accounts-character-badges">' + pills.join('') + '</div>' +
-      '</div>' +
-      '<div class="accounts-character-section">' +
-        '<div class="accounts-character-section-title">Equipped</div>' +
-        '<div class="accounts-equipment-grid">' + equipmentHtml + '</div>' +
-      '</div>' +
-      '<div class="accounts-character-section">' +
-        '<div class="accounts-character-section-title">Stats</div>' +
-        '<div class="accounts-stats-grid">' + statsHtml + '</div>' +
-      '</div>' +
-      '<div class="accounts-character-section">' +
-        '<div class="accounts-character-section-title">Inventory</div>' +
-        inventoryHtml +
-      '</div>';
-  }
-
-  // ─── Account sessions panel ─────────────────────────────────────────────
   //
   // Renders the "Sessions" overview tab. Pulls from window._AccountSessions
   // for both the live (in-progress) session and the persisted history. The
@@ -17541,18 +16373,7 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
   function handlePluginToggleError(msg) {
     var toast = document.createElement('div');
     toast.className = 'gem-toast';
-    if (msg.requiredPlan) {
-      var planDisplay = String(msg.requiredPlan).charAt(0).toUpperCase() + String(msg.requiredPlan).slice(1);
-      toast.innerHTML =
-        '<span>' + (msg.reason || ('Requires ' + planDisplay + ' plan')) + '</span>' +
-        '<button class="gem-toast-action">Manage Plan</button>';
-      var actionBtn = toast.querySelector('.gem-toast-action');
-      if (actionBtn) {
-        actionBtn.addEventListener('click', function () { toast.remove(); openPlanModal(); });
-      }
-    } else {
-      toast.textContent = msg.reason || 'Cannot enable plugin';
-    }
+    toast.textContent = msg.reason || 'Cannot enable plugin';
     document.body.appendChild(toast);
     setTimeout(function () { if (toast.parentNode) toast.remove(); }, 4500);
   }
@@ -18084,16 +16905,8 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
     window._eamPromise.then(function() { eamReady = true; maybeFinishSplash(); });
   }
 
-  if (hasStoredToken) setSplashStatus('Restoring session...');
-  restoreDashboardSessionFromTokens().then(function (ok) {
-    sessionReady = true;
-    if (!ok) setSplashStatus('Session expired — please sign in');
-    maybeFinishSplash();
-  }).catch(function () {
-    sessionReady = true;
-    setSplashStatus('Could not reach server', true);
-    maybeFinishSplash();
-  });
+  sessionReady = true;
+  maybeFinishSplash();
 
   // ── Plugin Store ───────────────────────────────────────────────────────────
   var storeManifest = null;
@@ -18426,164 +17239,6 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
 
   initPluginStore();
 
-  // ── Premium tab ───────────────────────────────────────────────────────────
-  var premRendered = false;
-
-  function renderPremiumTab() {
-    if (!document.getElementById('tab-premium')) return;
-    var emailEl   = document.getElementById('prem-email');
-    var sinceEl   = document.getElementById('prem-since');
-    var gemsEl    = document.getElementById('prem-gems');
-    var gemBadge  = document.getElementById('prem-gem-badge');
-    var gemNext   = document.getElementById('prem-gem-next');
-    var planEl    = document.getElementById('prem-plan-name');
-    var planSt    = document.getElementById('prem-plan-status');
-    var planEx    = document.getElementById('prem-plan-expires');
-    var plansBody = document.getElementById('prem-plans-body');
-
-    // Wire up buttons once
-    if (!premRendered) {
-      premRendered = true;
-      var buyBtn     = document.getElementById('prem-buy-gems');
-      var manageBtn  = document.getElementById('prem-manage-plan');
-      var signoutBtn = document.getElementById('prem-signout');
-      var upgradeBtn = document.getElementById('prem-hero-upgrade');
-      if (buyBtn)     buyBtn.addEventListener('click',    function () { openPurchaseModal(); });
-      if (manageBtn)  manageBtn.addEventListener('click', function () { openPlanModal(); });
-      if (signoutBtn) signoutBtn.addEventListener('click',function () { signOutDashboard(); });
-      if (upgradeBtn) upgradeBtn.addEventListener('click',function () {
-        var plansSection = document.querySelector('.prem-plans-section');
-        if (plansSection) plansSection.scrollIntoView({ behavior: 'smooth' });
-      });
-    }
-
-    // Populate from cached account data
-    if (dashboardLoggedIn && dashboardUser) {
-      if (emailEl) emailEl.textContent = dashboardUser.email || '—';
-      if (sinceEl && dashboardUser.created_at) sinceEl.textContent = formatDashboardDate(dashboardUser.created_at);
-    } else {
-      if (emailEl) emailEl.textContent = 'Not signed in';
-    }
-
-    if (!dashboardLoggedIn || !accessToken) {
-      if (gemsEl)   gemsEl.textContent = '0';
-      if (gemBadge) { gemBadge.textContent = 'Inactive'; gemBadge.className = 'acct-badge acct-badge--inactive'; }
-      if (planEl)   planEl.textContent = 'Free';
-      if (plansBody) plansBody.innerHTML = '<p class="prem-plans-loading">Sign in to manage your subscription.</p>';
-      return;
-    }
-
-    if (plansBody) plansBody.innerHTML = '<p class="prem-plans-loading">Loading…</p>';
-
-    var headers = { 'Authorization': 'Bearer ' + accessToken };
-
-    fetch('/api/payments/gems/status', { headers: headers })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (gemsEl)   gemsEl.textContent = Number(d.gem_balance || 0).toLocaleString();
-        if (gemBadge) {
-          var active = d.active;
-          gemBadge.textContent = active ? 'Active' : 'Inactive';
-          gemBadge.className = 'acct-badge ' + (active ? 'acct-badge--active' : 'acct-badge--inactive');
-        }
-        if (gemNext && d.next_deduction_at) {
-          gemNext.textContent = 'Next deduction: ' + new Date(d.next_deduction_at).toLocaleDateString();
-          gemNext.classList.remove('hidden');
-        }
-      }).catch(function () {});
-
-    fetch('/api/payments/subscription', { headers: headers })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        var name = d.plan_name || 'Free';
-        if (planEl) planEl.textContent = name;
-        if (planSt) {
-          if (d.status) { planSt.textContent = d.status; planSt.classList.remove('hidden'); }
-          else planSt.classList.add('hidden');
-        }
-        if (planEx) {
-          if (d.expires_at) { planEx.textContent = 'Renews ' + new Date(d.expires_at).toLocaleDateString(); planEx.classList.remove('hidden'); }
-          else planEx.classList.add('hidden');
-        }
-      }).catch(function () {});
-
-    fetch('/api/payments/plans', { headers: headers })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (!plansBody) return;
-        var plans = Array.isArray(d) ? d : (Array.isArray(d.plans) ? d.plans : []);
-        if (!plans.length) { plansBody.innerHTML = '<p class="prem-plans-loading">No plans available.</p>'; return; }
-        plansBody.innerHTML = '';
-        plans.forEach(function (plan) {
-          var card = document.createElement('div');
-          var isFree = String(plan.name || '').toLowerCase() === 'free';
-          card.className = 'prem-plan-card-item' + (isFree ? '' : ' prem-plan-card-item--premium');
-          var priceStr = plan.price_usd != null
-            ? (plan.price_usd === 0 ? 'Free' : '$' + Number(plan.price_usd).toFixed(2) + '/mo')
-            : (isFree ? 'Free' : '');
-          var features = Array.isArray(plan.features) ? plan.features : [];
-          card.innerHTML =
-            '<div class="prem-plan-header">' +
-              '<div class="prem-plan-name">' + escapeHtml(plan.name || 'Plan') + '</div>' +
-              '<div class="prem-plan-price">' + escapeHtml(priceStr) + '</div>' +
-            '</div>' +
-            (plan.description ? '<div class="prem-plan-desc">' + escapeHtml(plan.description) + '</div>' : '') +
-            (features.length ? '<ul class="prem-plan-features">' + features.map(function (f) { return '<li>' + escapeHtml(f) + '</li>'; }).join('') + '</ul>' : '') +
-            (!isFree ? '<button class="prem-plan-cta" data-plan-id="' + escapeHtml(String(plan.id || plan.name)) + '">Get ' + escapeHtml(plan.name) + '</button>' : '');
-          var cta = card.querySelector('.prem-plan-cta');
-          if (cta) cta.addEventListener('click', function () { openPlanModal(); });
-          plansBody.appendChild(card);
-        });
-      }).catch(function () {
-        if (plansBody) {
-          plansBody.innerHTML = '';
-          // Fallback: render static plan cards if API unavailable
-          renderPremiumFallbackPlans(plansBody);
-        }
-      });
-  }
-
-  function renderPremiumFallbackPlans(container) {
-    // Paid in gems (preload model). Rate: 100 G = $1.
-    //   Dodge:     $10/mo = 1,000 G/mo, auto-deducted monthly from balance
-    //   Developer: $20/mo = 2,000 G/mo, auto-deducted monthly from balance
-    var PLANS = [
-      { name: 'Free',      price: 'Free',      gemsPerMonth: 0,    color: '#94a3b8', badge: null,
-        desc: 'Core features — no subscription required.',
-        features: ['Auto Nexus', 'Loot Notifier', 'Server Switch', 'IP Connect', 'Rollback', 'O3 Helper'] },
-      { name: 'Dodge',     price: '$10/mo',    gemsPerMonth: 1000, color: '#2dd4bf', badge: 'Popular',
-        desc: 'Everything in Free plus full movement automation. Auto-renews from your gem balance.',
-        features: ['Auto Dodge', 'Safe Walk', 'Auto Aim', 'God Farming', 'Potion discount', 'All Free features'] },
-      { name: 'Developer', price: '$20/mo',    gemsPerMonth: 2000, color: '#a855f7', badge: 'Pro',
-        desc: 'Complete access including analytics and DLL bridge. Auto-renews from your gem balance.',
-        features: ['Damage Sniffer', 'Spoof Push Tiles', 'Packet Lab', 'DLL Walk-To', 'Potion discount', 'All Dodge features'] },
-    ];
-    PLANS.forEach(function (plan) {
-      var card = document.createElement('div');
-      card.className = 'prem-plan-card-item';
-      card.style.setProperty('--pc', plan.color);
-      var priceBlock = plan.gemsPerMonth > 0
-        ? plan.price + '<div class="prem-plan-banner-subprice">' + plan.gemsPerMonth.toLocaleString() + ' G/mo</div>'
-        : plan.price;
-      card.innerHTML =
-        '<div class="prem-plan-banner">' +
-          (plan.badge ? '<div class="prem-plan-badge">' + plan.badge + '</div>' : '') +
-          '<div class="prem-plan-banner-name">' + plan.name + '</div>' +
-          '<div class="prem-plan-banner-price">' + priceBlock + '</div>' +
-        '</div>' +
-        '<div class="prem-plan-content">' +
-          '<div class="prem-plan-desc">' + plan.desc + '</div>' +
-          '<ul class="prem-plan-features">' + plan.features.map(function (f) { return '<li>' + f + '</li>'; }).join('') + '</ul>' +
-        '</div>' +
-        (plan.price !== 'Free'
-          ? '<button class="prem-plan-cta">Subscribe with Gems →</button>'
-          : '<div class="prem-plan-current">Your current plan</div>');
-      var cta = card.querySelector('.prem-plan-cta');
-      if (cta) cta.addEventListener('click', function () { openPlanModal(); });
-      container.appendChild(card);
-    });
-  }
-
   // ── Home tab extras ────────────────────────────────────────────────────────
   var homeNewsItems = [
     { date: 'May 11 2026', tag: 'New',    color: '#22c55e', title: 'Plugin Store is Live',           body: 'Browse, install, and update signed plugins directly from the dashboard.' },
@@ -18661,9 +17316,8 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
       card.className = 'home-featured-card';
       card.style.setProperty('--fc', color);
 
-      var locked = p.requiredPlan && !(activePlanNames && activePlanNames.has(String(p.requiredPlan).toLowerCase())) && !document.body.classList.contains('admin-mode');
-      var btnLabel = installed ? '✓ Installed' : locked ? '🔒 ' + p.requiredPlan.charAt(0).toUpperCase() + p.requiredPlan.slice(1) : 'Install';
-      var btnClass = 'home-featured-btn' + (installed ? ' home-featured-btn--installed' : locked ? ' home-featured-btn--locked' : '');
+      var btnLabel = installed ? '✓ Installed' : 'Install';
+      var btnClass = 'home-featured-btn' + (installed ? ' home-featured-btn--installed' : '');
 
       card.innerHTML =
         '<div class="home-featured-banner">' +
@@ -18678,8 +17332,7 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
 
       if (!installed) {
         card.querySelector('button').addEventListener('click', function () {
-          if (locked) { var t = document.querySelector('[data-tab="market"]'); if (t) t.click(); }
-          else storeInstallPlugin(p, card.querySelector('button'));
+          storeInstallPlugin(p, card.querySelector('button'));
         });
       }
       grid.appendChild(card);
@@ -18693,14 +17346,8 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
 
     if (badge) {
       var isAdmin   = document.body.classList.contains('admin-mode');
-      var isPremium = isAdmin || (activePlanNames && activePlanNames.size > 0);
-      var planName  = isAdmin
-        ? 'Admin'
-        : isPremium
-          ? Array.from(activePlanNames)[0].charAt(0).toUpperCase() + Array.from(activePlanNames)[0].slice(1) + ' Plan'
-          : 'Free Plan';
-      badge.textContent = planName;
-      badge.className = 'home-hero-stat-badge' + (isPremium ? ' home-hero-stat-badge--premium' : '');
+      badge.textContent = isAdmin ? 'Admin' : 'Free Plan';
+      badge.className = 'home-hero-stat-badge' + (isAdmin ? ' home-hero-stat-badge--premium' : '');
     }
     var tbGems = document.getElementById('titlebar-gems');
     if (gemsEl && tbGems) gemsEl.textContent = tbGems.textContent || '0';
