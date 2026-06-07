@@ -22451,7 +22451,7 @@
     // as arrays of objectType numbers. We compute the multiset of pickups
     // since the last snapshot and look each new item up in EAM_ITEMS.
     //
-    // Schema of an EAM record (positional, observed from eam-assets.js):
+    // Schema of an EAM record (positional, observed from eam-assets.json):
     //   [0] name, [1] slotType, [2] tier (-1=UT), [3-4] sprite x/y,
     //   [5] rarityIdx, [6] cost, [7] bagType, [8] soulbound,
     //   [9] consumable-ish, [10] isShiny
