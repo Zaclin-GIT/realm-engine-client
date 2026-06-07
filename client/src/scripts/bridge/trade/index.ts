@@ -4,6 +4,7 @@ import type { BridgeDeps } from '../BridgeDeps.js';
 import type { ClientConnection } from '../../../proxy/ClientConnection.js';
 import type { Packet } from '../../../packets/Packet.js';
 import { Logger } from '../../../util/Logger.js';
+import { normalizeSlotCount, toBoolArray, extractTradeItemIncluded } from '../../../util/tradeSlots.js';
 
 type TradeSession = {
   active: boolean;
@@ -71,41 +72,6 @@ function normalizeTradeItem(raw: unknown): TradeItem {
 
 function normalizeTradeItems(raw: unknown): TradeItem[] {
   return Array.isArray(raw) ? raw.map(normalizeTradeItem) : [];
-}
-
-function normalizeSlotCount(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (Number.isFinite(parsed)) {
-    const count = Math.trunc(parsed);
-    if (count >= 1 && count <= 20) return count;
-  }
-  const fallbackParsed = Number(fallback);
-  if (Number.isFinite(fallbackParsed)) {
-    const fallbackCount = Math.trunc(fallbackParsed);
-    if (fallbackCount >= 1 && fallbackCount <= 20) return fallbackCount;
-  }
-  return 12;
-}
-
-function toBoolArray(value: unknown, count: number): boolean[] {
-  const normalizedCount = normalizeSlotCount(count, 12);
-  const out = new Array<boolean>(normalizedCount).fill(false);
-  if (!Array.isArray(value)) return out;
-  const max = Math.min(value.length, normalizedCount);
-  for (let i = 0; i < max; i++) out[i] = Boolean(value[i]);
-  return out;
-}
-
-function extractTradeItemIncluded(items: unknown[]): boolean[] {
-  const out: boolean[] = [];
-  for (const item of items) {
-    if (item && typeof item === 'object' && 'included' in item) {
-      out.push(Boolean((item as Record<string, unknown>).included));
-    } else {
-      out.push(false);
-    }
-  }
-  return out;
 }
 
 function activeSession(deps: BridgeDeps): TradeSession | undefined {

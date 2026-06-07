@@ -146,6 +146,7 @@ import {
   parseVerifyError,
   type DashboardAccountEquipmentToken,
 } from './charListParsers.js';
+import { normalizeSlotCount, toBoolArray, extractTradeItemIncluded, parseOfferSlots } from '../../util/tradeSlots.js';
 
 /** `taskkill /IM msedge.exe /F /T` — frees RAM from stray Edge renderer processes (Windows only). */
 function killMicrosoftEdgeProcessesBestEffort(): {
@@ -4138,65 +4139,6 @@ export class DevServer {
     this.tradeSession.partnerName = '';
   }
 
-  private normalizeSlotCount(value: unknown, fallback: number): number {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      const count = Math.trunc(parsed);
-      if (count >= 1 && count <= 20) return count;
-    }
-    const fallbackParsed = Number(fallback);
-    if (Number.isFinite(fallbackParsed)) {
-      const fallbackCount = Math.trunc(fallbackParsed);
-      if (fallbackCount >= 1 && fallbackCount <= 20) return fallbackCount;
-    }
-    return 12;
-  }
-
-  private toBoolArray(value: unknown, count: number): boolean[] {
-    const normalizedCount = this.normalizeSlotCount(count, 12);
-    const out = new Array<boolean>(normalizedCount).fill(false);
-    if (!Array.isArray(value)) return out;
-    const max = Math.min(value.length, normalizedCount);
-    for (let i = 0; i < max; i++) out[i] = Boolean(value[i]);
-    return out;
-  }
-
-  private extractTradeItemIncluded(items: unknown[]): boolean[] {
-    const out: boolean[] = [];
-    for (const item of items) {
-      if (item && typeof item === 'object' && 'included' in item) {
-        out.push(Boolean((item as Record<string, unknown>).included));
-      } else {
-        out.push(false);
-      }
-    }
-    return out;
-  }
-
-  private parseOfferSlots(raw: string, count: number): boolean[] {
-    const normalizedCount = this.normalizeSlotCount(count, 12);
-    const out = new Array<boolean>(normalizedCount).fill(false);
-    const trimmed = raw.trim();
-    if (!trimmed) return out;
-    if (trimmed === '*' || trimmed.toLowerCase() === 'all') {
-      return new Array<boolean>(normalizedCount).fill(true);
-    }
-
-    const parts = trimmed.split(',').map((p) => p.trim()).filter(Boolean);
-    if (!parts.length) return out;
-    for (const part of parts) {
-      if (!/^\d+$/.test(part)) {
-        throw new Error(`Invalid slot value "${part}". Use comma-separated indexes like 0,2,5 or "all".`);
-      }
-      const idx = Number(part);
-      if (!Number.isInteger(idx) || idx < 0 || idx >= normalizedCount) {
-        throw new Error(`Slot index ${idx} is out of range (0-${normalizedCount - 1}).`);
-      }
-      out[idx] = true;
-    }
-    return out;
-  }
-
   private observeTradePacket(pkt: CapturedPacket): void {
     const name = String(pkt.name ?? '').toUpperCase();
     const direction = String(pkt.direction ?? '');
@@ -4208,14 +4150,14 @@ export class DevServer {
       const clientItems = Array.isArray(data.clientItems) ? data.clientItems : [];
       const partnerItems = Array.isArray(data.partnerItems) ? data.partnerItems : [];
       this.tradeSession.active = true;
-      this.tradeSession.ourSlotCount = this.normalizeSlotCount(clientItems.length, this.tradeSession.ourSlotCount);
-      this.tradeSession.partnerSlotCount = this.normalizeSlotCount(partnerItems.length, this.tradeSession.partnerSlotCount);
-      this.tradeSession.ourOffer = this.toBoolArray(
-        this.extractTradeItemIncluded(clientItems),
+      this.tradeSession.ourSlotCount = normalizeSlotCount(clientItems.length, this.tradeSession.ourSlotCount);
+      this.tradeSession.partnerSlotCount = normalizeSlotCount(partnerItems.length, this.tradeSession.partnerSlotCount);
+      this.tradeSession.ourOffer = toBoolArray(
+        extractTradeItemIncluded(clientItems),
         this.tradeSession.ourSlotCount,
       );
-      this.tradeSession.partnerOffer = this.toBoolArray(
-        this.extractTradeItemIncluded(partnerItems),
+      this.tradeSession.partnerOffer = toBoolArray(
+        extractTradeItemIncluded(partnerItems),
         this.tradeSession.partnerSlotCount,
       );
       this.tradeSession.partnerOfferFromTradeChanged = this.tradeSession.partnerOffer.slice();
@@ -4225,7 +4167,7 @@ export class DevServer {
 
     if (name === 'TRADECHANGED' && fromServer) {
       this.tradeSession.active = true;
-      const next = this.toBoolArray(data.offer, this.tradeSession.partnerSlotCount);
+      const next = toBoolArray(data.offer, this.tradeSession.partnerSlotCount);
       this.tradeSession.partnerOffer = next;
       this.tradeSession.partnerOfferFromTradeChanged = next.slice();
       return;
@@ -4233,14 +4175,14 @@ export class DevServer {
 
     if (name === 'CHANGETRADE' && fromClient) {
       this.tradeSession.active = true;
-      this.tradeSession.ourOffer = this.toBoolArray(data.offer, this.tradeSession.ourSlotCount);
+      this.tradeSession.ourOffer = toBoolArray(data.offer, this.tradeSession.ourSlotCount);
       return;
     }
 
     if (name === 'TRADEACCEPTED' && fromServer) {
       this.tradeSession.active = true;
-      this.tradeSession.ourOffer = this.toBoolArray(data.clientOffer, this.tradeSession.ourSlotCount);
-      this.tradeSession.partnerOffer = this.toBoolArray(data.partnerOffer, this.tradeSession.partnerSlotCount);
+      this.tradeSession.ourOffer = toBoolArray(data.clientOffer, this.tradeSession.ourSlotCount);
+      this.tradeSession.partnerOffer = toBoolArray(data.partnerOffer, this.tradeSession.partnerSlotCount);
       // partnerOfferFromTradeChanged unchanged — ACCEPTTRADE must echo last TRADECHANGED
       return;
     }
@@ -4289,24 +4231,24 @@ export class DevServer {
         }
         packet.data.name = targetName;
       } else if (packetName === 'ACCEPTTRADE') {
-        const ourCount = this.normalizeSlotCount(this.tradeSession.ourSlotCount, 12);
-        const partnerCount = this.normalizeSlotCount(this.tradeSession.partnerSlotCount, 12);
-        packet.data.clientOffer = this.toBoolArray(this.tradeSession.ourOffer, ourCount);
+        const ourCount = normalizeSlotCount(this.tradeSession.ourSlotCount, 12);
+        const partnerCount = normalizeSlotCount(this.tradeSession.partnerSlotCount, 12);
+        packet.data.clientOffer = toBoolArray(this.tradeSession.ourOffer, ourCount);
         const partnerLine =
           this.tradeSession.partnerOfferFromTradeChanged.length > 0
             ? this.tradeSession.partnerOfferFromTradeChanged
             : this.tradeSession.partnerOffer;
-        packet.data.partnerOffer = this.toBoolArray(partnerLine, partnerCount);
+        packet.data.partnerOffer = toBoolArray(partnerLine, partnerCount);
       } else if (packetName === 'CHANGETRADE') {
-        const ourCount = this.normalizeSlotCount(this.tradeSession.ourSlotCount, 12);
+        const ourCount = normalizeSlotCount(this.tradeSession.ourSlotCount, 12);
         let offer: boolean[];
         if (Array.isArray(data.offer)) {
-          offer = this.toBoolArray(data.offer, ourCount);
+          offer = toBoolArray(data.offer, ourCount);
         } else {
           const offerSlots = String(data.offerSlots ?? '').trim();
           offer = offerSlots
-            ? this.parseOfferSlots(offerSlots, ourCount)
-            : this.toBoolArray(this.tradeSession.ourOffer, ourCount);
+            ? parseOfferSlots(offerSlots, ourCount)
+            : toBoolArray(this.tradeSession.ourOffer, ourCount);
         }
         packet.data.offer = offer;
         this.tradeSession.ourOffer = offer.slice();
