@@ -1990,6 +1990,30 @@
   </div>
 </div>
 
+<!-- Item detail modal (opened from an item sprite — sprite, enchants, drop locations) -->
+<div id="item-detail-overlay" class="hidden">
+  <div id="item-detail-modal">
+    <div class="item-detail-header">
+      <div class="item-detail-title-wrap">
+        <div id="item-detail-title" class="item-detail-title">Item</div>
+        <div id="item-detail-subtitle" class="item-detail-subtitle"></div>
+      </div>
+      <button id="item-detail-close" class="icon-btn item-detail-close-btn" type="button" title="Close">×</button>
+    </div>
+    <div class="item-detail-body">
+      <div id="item-detail-sprite" class="item-detail-sprite-wrap"></div>
+      <div class="item-detail-section">
+        <div class="item-detail-section-title">Enchants</div>
+        <div id="item-detail-enchants" class="item-detail-enchants"></div>
+      </div>
+      <div id="item-detail-locations-section" class="item-detail-section hidden">
+        <div class="item-detail-section-title">Locations</div>
+        <div id="item-detail-locations" class="item-detail-locations"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Home card add picker modal -->
 <div id="home-add-modal" class="home-add-modal hidden" aria-hidden="true">
   <div class="home-add-modal-backdrop" data-home-add-close></div>
