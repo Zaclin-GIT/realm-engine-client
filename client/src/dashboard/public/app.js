@@ -1593,6 +1593,16 @@ import { NOISY_PACKETS, MAX_ROWS, MAX_PLUGIN_LOGS, CLASS_NAMES, CLASS_COLORS, SK
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeSettingsPopout();
+  });
+
+  (function relocateSettingsAndAccountIntoTab() {
+    var tabAccount = document.getElementById('settings-tab-account');
+    var tabForm = document.getElementById('settings-tab-form');
+    if (!tabAccount || !tabForm) return;
+
+    // Move the account-popup body (profile card, action buttons, sign out)
+    // into the Settings tab. We strip the wrapper "popup" chrome so it lays
+    // out as an inline section.
     var acctOverlay = document.getElementById('account-popup-overlay');
     if (acctOverlay) {
       var acctBody = acctOverlay.querySelector('.account-popup-body');
