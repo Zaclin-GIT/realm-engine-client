@@ -2,7 +2,6 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const { spawn, fork, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { runEarlyChecks, hardenWindow } = require('./security.cjs');
 const { WindowHostBridge } = require('./services/window-host-bridge.cjs');
 const { InstanceManager } = require('./services/instance-manager.cjs');
 
@@ -18,16 +17,6 @@ if (process.platform === 'win32') {
   app.setAppUserModelId(APP_USER_MODEL_ID);
 }
 
-// ── Security bootstrap ────────────────────────────────────────────────────────
-const _projectRoot = path.join(__dirname, '..');
-const _isProd = (
-  fs.existsSync(path.join(_projectRoot, 'dist', 'app.cjs'))
-  && !fs.existsSync(path.join(_projectRoot, 'src', 'index.ts'))
-) || process.env.REALM_ENGINE_PROD === '1';
-
-// Run checks but DON'T exit yet — we need the window to show errors
-const _securityResult = runEarlyChecks(_isProd, _projectRoot);
-// ─────────────────────────────────────────────────────────────────────────────
 
 let mainWindow = null;
 let proxyProcess = null;
@@ -224,8 +213,6 @@ function createWindow() {
     show: false,
   });
 
-  hardenWindow(mainWindow, app.isPackaged);
-
   mainWindow.on('maximize', () => mainWindow.webContents.send('window:maximized'));
   mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:unmaximized'));
 
@@ -247,11 +234,6 @@ function createWindow() {
   // Load the loading screen (inline data URL — no file deps), then act
   const loadingUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(buildLoadingHtml());
   mainWindow.loadURL(loadingUrl).catch(() => {}).then(() => {
-    // If security checks failed, show the error and stop
-    if (!_securityResult.ok) {
-      setLoadingStatus('Security check failed: ' + _securityResult.reasons.join('; '), true);
-      return;
-    }
     // Start polling for dashboard
     waitForDashboardAndLoad();
   });

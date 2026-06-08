@@ -37,12 +37,6 @@ if (process.send) {
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-// ── Anti-tamper bootstrap ─────────────────────────────────────────────────────
-// AntiHook.captureBaseline() must snapshot native functions before *anything*
-// else can monkey-patch them.  Import and initialise first.
-import { AntiHook } from './security/AntiHook.js';
-AntiHook.captureBaseline();
-// ─────────────────────────────────────────────────────────────────────────────
 
 import { resolve, dirname, join } from 'path';
 import { homedir } from 'os';
@@ -68,7 +62,6 @@ import { setDllFeatureSender } from './bridge/DllFeatureBus.js';
 import { Logger } from './util/Logger.js';
 import { ensureRotmgMetadataXml } from './util/ensureRotmgMetadataXml.js';
 import { ensureSdkDeployed } from './util/ensureSdkDeployed.js';
-import { AntiTamper } from './security/AntiTamper.js';
 import { getBakedPacketDefinitions, getBakedServers, getBakedStatTypes } from './config/BakedData.js';
 import {
   readMergedClientConfigRaw,
@@ -158,10 +151,6 @@ async function main() {
   const devMode = true; // Dashboard always runs — there is no headless mode.
 
   Logger.log('Main', 'RotMG MITM Proxy starting...');
-
-  // Initialise anti-tamper (runs initial sweep + blocks inspector signal).
-  // IS_PROD gates the file-integrity checks so dev mode is unaffected.
-  AntiTamper.initialize(ROOT, IS_PROD);
 
   // 0. Install game hook (DLL injection for connection redirect)
   const clientDataConfig = loadClientDataConfig();
@@ -549,14 +538,9 @@ async function main() {
     devServer?.broadcastDllMessage(msg);
   });
 
-  // Start periodic anti-tamper sweeps (30 s interval, unref'd so it doesn't
-  // keep the process alive on its own).
-  AntiTamper.startMonitoring(30_000);
-
   // Graceful shutdown
   const shutdown = async () => {
     Logger.log('Main', 'Shutting down...');
-    AntiTamper.stopMonitoring();
     scriptHost?.stopAll();
     internalBridge.stop();
     setDllFeatureSender(null);
