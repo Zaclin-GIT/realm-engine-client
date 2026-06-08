@@ -13,9 +13,8 @@ import { sendDllFeature } from '../bridge/DllFeatureBus.js';
 
 /**
  * Where a loaded plugin's code came from.
- * - `bundled`: shipped in the app (TS/JS files in `plugins/`) or fetched from the signed API bundle.
+ * - `bundled`: shipped in the app (TS/JS files in `plugins/`).
  * - `user`: a `.mjs` the user dropped into `Documents/Realmengine/Plugins/` themselves.
- * User plugins are unverified and bypass the login/gem/admin gates — they are free to run.
  */
 type PluginSource = 'bundled' | 'user';
 

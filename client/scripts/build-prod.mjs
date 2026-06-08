@@ -5,19 +5,17 @@
  *   1. Clean dist/
  *   2. Generate shared HMAC secret → BuildSecrets.h + __HANDSHAKE_KEY__
  *   3. Build C++ DLL via MSBuild (Release|x64)
- *   4. AES-256-GCM encrypt the DLL → assets/internal.bin
- *   5. Bundle core app with esbuild (embed DLL key + handshake key via define)
+ *   4. Copy the built DLL → assets/version.dll (plain — open source, no encryption)
+ *   5. Bundle core app with esbuild (embed handshake key via define)
  *   6. Bundle each plugin individually (plugins/*.ts -> dist/plugins/*.js)
- *   7. Obfuscate all JS output with javascript-obfuscator
- *   8. Generate dist/integrity.json (SHA-256 hashes for anti-tamper checks)
+ *   7. Stage dist/public + inject __ADMIN_BUILD__ flag
  */
 
 import * as esbuild from 'esbuild';
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, copyFileSync, existsSync, statSync } from 'fs';
-import { join, resolve, basename } from 'path';
+import { join, resolve } from 'path';
 import { execSync } from 'child_process';
-import { createHash, randomBytes, createCipheriv } from 'crypto';
-import JavaScriptObfuscator from 'javascript-obfuscator';
+import { randomBytes } from 'crypto';
 
 const ADMIN_BUILD = process.argv.includes('--admin');
 
@@ -42,10 +40,8 @@ function findInternalDir() {
 const INTERNAL_DIR = findInternalDir();
 const DLL_SLN = join(INTERNAL_DIR, 'il2cpp-dll-injection.sln');
 const DLL_OUTPUT = join(INTERNAL_DIR, 'x64', 'Release', 'version.dll');
-const DLL_DEST = join(ROOT, 'assets', 'internal.bin');
+const DLL_DEST = join(ROOT, 'assets', 'version.dll');
 const BUILD_SECRETS_H = join(INTERNAL_DIR, 'src', 'ui', 'BuildSecrets.h');
-const PLUGIN_SIG_PUBLIC_KEY = String(process.env.PLUGIN_BUNDLE_SIGNING_PUBLIC_KEY_PEM || '');
-const PLUGIN_ENC_KEY = String(process.env.PLUGIN_BUNDLE_ENC_KEY || '');
 const PACKET_DEFINITIONS_JSON = readFileSync(join(DATA_DIR, 'packet-definitions.json'), 'utf8');
 const STAT_TYPES_JSON = readFileSync(join(DATA_DIR, 'stat-types.json'), 'utf8');
 const SERVERS_JSON = readFileSync(join(DATA_DIR, 'servers.json'), 'utf8');
@@ -57,42 +53,6 @@ const ADMIN_ONLY_PLUGINS = new Set([
   'auto-ability.ts',
   'packet-logger.ts',
 ]);
-
-// Core bundle config: no stringArray — it breaks bundled libraries like ws
-// that use dynamic property access (this.options.WebSocket as constructor).
-const OBFUSCATOR_CORE_CONFIG = {
-  compact: true,
-  controlFlowFlattening: true,
-  controlFlowFlatteningThreshold: 0.4,
-  deadCodeInjection: true,
-  deadCodeInjectionThreshold: 0.15,
-  debugProtection: false,
-  identifierNamesGenerator: 'hexadecimal',
-  renameGlobals: false,
-  selfDefending: false,
-  stringArray: false,
-  transformObjectKeys: false,
-  unicodeEscapeSequence: false,
-};
-
-// Plugin config: full obfuscation including stringArray + rc4 encoding.
-// Plugins don't bundle ws or other libs with dynamic property patterns.
-const OBFUSCATOR_PLUGIN_CONFIG = {
-  compact: true,
-  controlFlowFlattening: true,
-  controlFlowFlatteningThreshold: 0.5,
-  deadCodeInjection: true,
-  deadCodeInjectionThreshold: 0.2,
-  debugProtection: false,
-  identifierNamesGenerator: 'hexadecimal',
-  renameGlobals: false,
-  selfDefending: false,
-  stringArray: true,
-  stringArrayEncoding: ['rc4'],
-  stringArrayThreshold: 0.75,
-  transformObjectKeys: false,
-  unicodeEscapeSequence: false,
-};
 
 function log(msg) {
   console.log(`[build-prod] ${msg}`);
@@ -106,12 +66,6 @@ function fileSize(path) {
 // ── Step 1: Clean ────────────────────────────────────────────────────────────
 
 log(`Build mode: ${ADMIN_BUILD ? 'ADMIN (dev features included)' : 'USER (admin features stripped)'}`);
-if (!PLUGIN_SIG_PUBLIC_KEY.trim()) {
-  log('Warning: PLUGIN_BUNDLE_SIGNING_PUBLIC_KEY_PEM not set; production remote plugin loading will be blocked.');
-}
-if (!/^[0-9a-fA-F]{64}$/.test(PLUGIN_ENC_KEY)) {
-  log('Warning: PLUGIN_BUNDLE_ENC_KEY missing/invalid; production remote plugin loading will be blocked.');
-}
 log('Cleaning dist/...');
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(PLUGINS_DIST, { recursive: true });
@@ -218,27 +172,16 @@ if (!existsSync(DLL_OUTPUT)) {
 
 log(`DLL built: ${fileSize(DLL_OUTPUT)}`);
 
-// ── Step 3: AES-encrypt DLL ──────────────────────────────────────────────────
+// ── Step 4: Ship DLL (plain — open source) ───────────────────────────────────
 
-log('Encrypting DLL (AES-256-GCM)...');
+// Open source: the DLL is shipped unencrypted as assets/version.dll. The
+// runtime deploy path (index.ts) already prefers assets/version.dll, so no
+// decryption step or embedded key is needed.
+mkdirSync(join(ROOT, 'assets'), { recursive: true });
+copyFileSync(DLL_OUTPUT, DLL_DEST);
+log(`DLL copied → assets/version.dll (${fileSize(DLL_DEST)})`);
 
-const dllKey = randomBytes(32);
-const dllIv  = randomBytes(16);
-const cipher = createCipheriv('aes-256-gcm', dllKey, dllIv);
-const dllPlain = readFileSync(DLL_OUTPUT);
-const encryptedDll = Buffer.concat([cipher.update(dllPlain), cipher.final()]);
-const authTag = cipher.getAuthTag();
-
-// Pack as: [16 IV][16 authTag][...ciphertext]
-const packed = Buffer.concat([dllIv, authTag, encryptedDll]);
-writeFileSync(DLL_DEST, packed);
-
-// Hex key will be baked into the JS bundle via esbuild `define` below.
-const dllKeyHex = dllKey.toString('hex');
-
-log(`DLL encrypted: ${fileSize(DLL_OUTPUT)} → ${fileSize(DLL_DEST)}`);
-
-// ── Step 4: Bundle core ──────────────────────────────────────────────────────
+// ── Step 5: Bundle core ──────────────────────────────────────────────────────
 
 log('Bundling core application...');
 await esbuild.build({
@@ -265,12 +208,9 @@ await esbuild.build({
   },
   define: {
     PRODUCTION: '"true"',
-    __DLL_KEY__: JSON.stringify(dllKeyHex),
     __HANDSHAKE_KEY__: JSON.stringify(handshakeKey),
     __PIPE_NAME__: JSON.stringify(pipeName),
     __ADMIN_BUILD__: String(ADMIN_BUILD),
-    __PLUGIN_BUNDLE_SIGNING_PUBLIC_KEY__: JSON.stringify(PLUGIN_SIG_PUBLIC_KEY),
-    __PLUGIN_BUNDLE_ENC_KEY__: JSON.stringify(PLUGIN_ENC_KEY),
     __PACKET_DEFINITIONS_JSON__: JSON.stringify(PACKET_DEFINITIONS_JSON),
     __STAT_TYPES_JSON__: JSON.stringify(STAT_TYPES_JSON),
     __SERVERS_JSON__: JSON.stringify(SERVERS_JSON),
@@ -280,7 +220,7 @@ await esbuild.build({
 });
 log(`Core bundled: ${fileSize(join(DIST, 'app.cjs'))}`);
 
-// ── Step 5: Bundle plugins ───────────────────────────────────────────────────
+// ── Step 6: Bundle plugins ───────────────────────────────────────────────────
 
 log('Bundling plugins...');
 const excludedPluginFiles = new Set(EXCLUDED_PLUGINS);
@@ -319,11 +259,11 @@ for (const { entry, outName } of pluginEntries) {
     sourcemap: false,
     treeShaking: true,
     // 'electron' MUST be external — bundling it pulls in node_modules/electron/
-  // index.js (the launcher stub for *spawning* electron from outside) and
-  // throws "Electron failed to install correctly" at runtime inside the
-  // packaged app. Marked external so `import { shell } from 'electron'`
-  // resolves to electron's built-in module loader at runtime.
-  external: ['koffi', 'sharp', 'electron'],
+    // index.js (the launcher stub for *spawning* electron from outside) and
+    // throws "Electron failed to install correctly" at runtime inside the
+    // packaged app. Marked external so `import { shell } from 'electron'`
+    // resolves to electron's built-in module loader at runtime.
+    external: ['koffi', 'sharp', 'electron'],
     define: {
       __ADMIN_BUILD__: String(ADMIN_BUILD),
       __PACKET_DEFINITIONS_JSON__: JSON.stringify(PACKET_DEFINITIONS_JSON),
@@ -335,24 +275,7 @@ for (const { entry, outName } of pluginEntries) {
 }
 log(`${pluginEntries.length} plugins bundled`);
 
-// ── Step 6: Obfuscate ────────────────────────────────────────────────────────
-
-log('Obfuscating core (no stringArray — ws compat)...');
-const appCode = readFileSync(join(DIST, 'app.cjs'), 'utf-8');
-const obfuscatedApp = JavaScriptObfuscator.obfuscate(appCode, OBFUSCATOR_CORE_CONFIG).getObfuscatedCode();
-writeFileSync(join(DIST, 'app.cjs'), obfuscatedApp);
-log(`Core obfuscated: ${fileSize(join(DIST, 'app.cjs'))}`);
-
-log('Obfuscating plugins (full + stringArray rc4)...');
-for (const file of readdirSync(PLUGINS_DIST).filter(f => f.endsWith('.js'))) {
-  const filePath = join(PLUGINS_DIST, file);
-  const code = readFileSync(filePath, 'utf-8');
-  const obfuscated = JavaScriptObfuscator.obfuscate(code, OBFUSCATOR_PLUGIN_CONFIG).getObfuscatedCode();
-  writeFileSync(filePath, obfuscated);
-}
-log('Plugins obfuscated');
-
-// ── Step 6b: Strip admin features from dashboard (user builds only) ──────────
+// ── Step 7: Strip admin features from dashboard (user builds only) ───────────
 
 // Copy src/dashboard/public → dist/public (staging copy — never modify source)
 const PUBLIC_SRC = join(ROOT, 'src', 'dashboard', 'public');
@@ -388,55 +311,6 @@ for (const f of readdirSync(PUBLIC_SRC)) {
   log(ADMIN_BUILD ? 'Admin build — all features enabled' : 'User build — admin features locked');
 }
 
-// ── Step 7: Generate integrity manifest ──────────────────────────────────────
-
-log('Generating integrity manifest...');
-
-/**
- * Compute SHA-256 hex digest for a file.
- * @param {string} filePath
- */
-function hashFile(filePath) {
-  const data = readFileSync(filePath);
-  return createHash('sha256').update(data).digest('hex');
-}
-
-/**
- * Files to include in the manifest.
- *
- * - electron/main.cjs and electron/preload.cjs are not obfuscated and
- *   are verified by dist/app.cjs at runtime.
- * - dist/app.cjs is the obfuscated bundle; verified by electron/main.cjs
- *   before it is forked.
- * - dist/plugins/*.js are verified alongside the core bundle.
- *
- * Paths are relative to ROOT, using forward slashes.
- */
-const MANIFEST_FILES = [
-  'electron/main.cjs',
-  'electron/preload.cjs',
-  'electron/security.cjs',
-  'electron/loading.html',
-  'dist/app.cjs',
-  // Plugins are added dynamically below.
-];
-
-for (const file of readdirSync(PLUGINS_DIST).filter(f => f.endsWith('.js'))) {
-  MANIFEST_FILES.push(`dist/plugins/${file}`);
-}
-
-const manifest = MANIFEST_FILES.map(relPath => {
-  const fullPath = resolve(ROOT, relPath.replace(/\//g, process.platform === 'win32' ? '\\' : '/'));
-  if (!existsSync(fullPath)) {
-    console.error(`[build-prod] ERROR: manifest target not found: ${fullPath}`);
-    process.exit(1);
-  }
-  return { path: relPath, sha256: hashFile(fullPath) };
-});
-
-writeFileSync(join(DIST, 'integrity.json'), JSON.stringify(manifest, null, 2));
-log(`Integrity manifest written: dist/integrity.json (${manifest.length} entries)`);
-
 // Best-effort cleanup: keep the generated handshake secret header out of disk
 // between builds. It is regenerated for each production build anyway.
 try {
@@ -453,8 +327,7 @@ log('Production build complete!');
 log('');
 log('Output:');
 log(`  Core:      dist/app.cjs (${fileSize(join(DIST, 'app.cjs'))})`);
-log(`  Plugins:   dist/plugins/ (${pluginFiles.length} files)`);
-log(`  DLL:       assets/internal.bin (${fileSize(DLL_DEST)})`);
-log(`  Integrity: dist/integrity.json (${manifest.length} entries)`);
+log(`  Plugins:   dist/plugins/ (${pluginEntries.length} files)`);
+log(`  DLL:       assets/version.dll (${fileSize(DLL_DEST)})`);
 log('');
 log('Run "npm run dist" to package with electron-builder.');

@@ -16,7 +16,6 @@
     "electron/**/*",
     "dist/app.cjs",
     "dist/plugins/**/*",
-    "dist/integrity.json",
     "package.json"
   ],
   "extraResources": [

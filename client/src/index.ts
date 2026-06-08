@@ -186,15 +186,10 @@ async function main() {
     | 'env_override'
     | 'config_override'
     | 'assets_dll'
-    | 'encrypted'
     | 'dev_copy'
-    | 'dev_copy_newer_than_bin'
     | 'skipped_env'
     | 'none'
     | 'error' = 'none';
-  /** Set when both internal.bin and a local dev version.dll exist; logged for deploy diagnostics. */
-  let internalBinMtimeMs: number | null = null;
-  let devDllMtimeMs: number | null = null;
   if (hooker.gameDirectory) {
     const skipVersionDeploy = process.env.REALM_ENGINE_SKIP_VERSION_DLL_DEPLOY === '1';
     if (skipVersionDeploy) {
@@ -207,7 +202,6 @@ async function main() {
     try {
       const cheatDllDest = resolve(hooker.gameDirectory, 'version.dll');
       let deployed = false;
-      const binPath = resolve(assetsDir, 'internal.bin');
       // APP_ROOT = bot-client dir (Electron sets REALM_ENGINE_APP_ROOT). ROOT may be resourcesPath in prod,
       // so never use ROOT/.. for repo siblings — that misses LFG/DebugInternal next to LFG/bot-client.
       const devDll = resolveDefaultDevInternalDll();
@@ -239,8 +233,8 @@ async function main() {
         }
       }
 
-      // Dev build output: assets/version.dll (written by VS when OutDir = client/assets/).
-      // Takes priority over encrypted blob so a local rebuild is always used immediately.
+      // Shipped DLL: assets/version.dll (plain — written by build-prod, or by VS
+      // when OutDir = client/assets/). Open source: no encrypted blob.
       const assetsDll = resolve(assetsDir, 'version.dll');
       if (!deployed && existsSync(assetsDll)) {
         try {
@@ -253,31 +247,7 @@ async function main() {
         }
       }
 
-      // If a local DebugInternal build is newer than the shipped encrypted blob, prefer it.
-      // Stale internal.bin often mismatches the live Exalt client and crashes inside IL2CPP/hooks.
-      if (devDll && existsSync(binPath)) {
-        try {
-          internalBinMtimeMs = statSync(binPath).mtimeMs;
-          devDllMtimeMs = statSync(devDll).mtimeMs;
-          if (devDllMtimeMs > internalBinMtimeMs) {
-            copyFileSync(devDll, cheatDllDest);
-            deployed = true;
-            versionDeploySource = 'dev_copy_newer_than_bin';
-          }
-        } catch {
-          /* fall through to encrypted / plain dev copy */
-        }
-      }
-
-      // Production: decrypt assets/internal.bin → version.dll
-      if (!deployed && existsSync(binPath)) {
-        try {
-          const { extractEncryptedDll } = await import('./hooker/DllCrypto.js');
-          deployed = extractEncryptedDll(assetsDir, 'internal', cheatDllDest);
-          if (deployed) versionDeploySource = 'encrypted';
-        } catch {}
-      }
-      // Dev fallback: copy raw DLL from DebugInternal build output
+      // Dev fallback: copy raw DLL from a local internal build output.
       if (!deployed && devDll) {
         try {
           copyFileSync(devDll, cheatDllDest);
@@ -288,51 +258,13 @@ async function main() {
       if (deployed) {
         Logger.log('Main', `Internal DLL deployed to ${cheatDllDest}`);
       } else {
-        Logger.warn('Main', 'Internal DLL not found (no assets/internal.bin and no local internal build). DLL features unavailable.');
+        Logger.warn('Main', 'Internal DLL not found (no assets/version.dll and no local internal build). DLL features unavailable.');
       }
     } catch (err) {
       versionDeploySource = 'error';
       Logger.warn('Main', `Internal DLL deployment failed: ${(err as Error).message}`);
     }
     }
-    // #region agent log
-    {
-      const gd = hooker.gameDirectory;
-      const norm = (p: string | null | undefined) =>
-        String(p || '')
-          .trim()
-          .replace(/\\/g, '/')
-          .toLowerCase();
-      const vPath = gd ? resolve(gd, 'version.dll') : '';
-      const wPath = gd ? resolve(gd, 'winhttp.dll') : '';
-      let vSz: number | null = null;
-      let wSz: number | null = null;
-      try {
-        if (vPath && existsSync(vPath)) vSz = statSync(vPath).size;
-      } catch {
-        vSz = null;
-      }
-      try {
-        if (wPath && existsSync(wPath)) wSz = statSync(wPath).size;
-      } catch {
-        wSz = null;
-      }
-      const logDevDll = resolveDefaultDevInternalDll();
-      const logBinPath = resolve(assetsDir, 'internal.bin');
-      let binMtimeProbe: number | null = null;
-      let devMtimeProbe: number | null = null;
-      try {
-        if (existsSync(logBinPath)) binMtimeProbe = statSync(logBinPath).mtimeMs;
-      } catch {
-        binMtimeProbe = null;
-      }
-      try {
-        if (logDevDll && existsSync(logDevDll)) devMtimeProbe = statSync(logDevDll).mtimeMs;
-      } catch {
-        devMtimeProbe = null;
-      }
-    }
-    // #endregion
   }
 
   // 1. Load packet definitions

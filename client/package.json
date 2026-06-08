@@ -19,8 +19,6 @@
     "dist:installer": "npm run build:native && npm run build:prod && electron-builder --win nsis",
     "dist:portable": "npm run build:native && npm run build:prod && electron-builder --win portable",
     "dist:admin": "npm run build:native && npm run build:admin && electron-builder --win portable",
-    "upload-plugins": "node scripts/upload-plugins.mjs",
-    "deploy-plugins": "npm run build:prod && npm run upload-plugins",
     "installer:desktop": "bash scripts/installer-to-desktop.sh",
     "installer:desktop:portable": "bash scripts/installer-to-desktop.sh portable"
   },
